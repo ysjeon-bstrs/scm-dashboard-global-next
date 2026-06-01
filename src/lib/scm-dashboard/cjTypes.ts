@@ -42,3 +42,32 @@ export interface CjLotStockResponse {
     depot: string | null;
   };
 }
+
+export interface CjAllocationRequestRow {
+  rowNumber: number;
+  resource_code: string;
+  resource_name?: string | null;
+  requested_qty: number;
+  depot_code?: string | null;
+  reference?: string | null;
+}
+
+export interface CjLotAllocationRow extends CjAllocationRequestRow {
+  lot_no: string | null;
+  expiration_date: string | null;
+  available_qty: number;
+  allocated_qty: number;
+  shortage_qty: number;
+  status: "allocated" | "partial" | "shortage" | "unmatched";
+}
+
+export interface CjAllocationResponse {
+  rows: CjLotAllocationRow[];
+  notices: string[];
+  meta: {
+    requestCount: number;
+    allocationCount: number;
+    skuCount: number;
+    latestOnly: boolean;
+  };
+}

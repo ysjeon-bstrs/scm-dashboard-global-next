@@ -51,6 +51,7 @@ export function mapCjLotStockRow(row: CjLotStockDbRow): CjLotStockRow {
 interface FetchCjLotStockOptions {
   limit: number;
   sku?: string | null;
+  skus?: string[];
   depot?: string | null;
   latestOnly: boolean;
 }
@@ -58,6 +59,7 @@ interface FetchCjLotStockOptions {
 export async function fetchCjLotStocks({
   limit,
   sku,
+  skus,
   depot,
   latestOnly,
 }: FetchCjLotStockOptions) {
@@ -72,6 +74,17 @@ export async function fetchCjLotStocks({
   if (sku) {
     where.push("prodCd = :sku");
     params.sku = sku;
+  }
+
+  const uniqueSkus = Array.from(
+    new Set((skus ?? []).map((value) => value.trim()).filter(Boolean)),
+  );
+  if (!sku && uniqueSkus.length > 0) {
+    const placeholders = uniqueSkus.map((_, index) => `:sku${index}`);
+    where.push(`prodCd IN (${placeholders.join(", ")})`);
+    uniqueSkus.forEach((value, index) => {
+      params[`sku${index}`] = value;
+    });
   }
 
   if (depot) {
