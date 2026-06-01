@@ -136,12 +136,23 @@ interface CjAllocationClientProps {
   initialAuthError: "unauthenticated" | "forbidden-domain" | null;
 }
 
+const OUTBOUND_TYPES = ["FBA", "TikTokShop", "B2B"] as const;
+const DEPOT_OPTIONS = [
+  "CJLA 1 Amazon",
+  "CJLA 2 TikTokShop",
+  "CJLA 4 B2B",
+  "Thailand 1 Center",
+] as const;
+
+type OutboundType = (typeof OUTBOUND_TYPES)[number];
+
 export default function CjAllocationClient({
   user,
   initialAuthError,
 }: CjAllocationClientProps) {
   const [sku, setSku] = useState("");
-  const [depot, setDepot] = useState("");
+  const [outboundType, setOutboundType] = useState<OutboundType>("FBA");
+  const [depot, setDepot] = useState<string>("CJLA 1 Amazon");
   const [stockRows, setStockRows] = useState<CjLotStockRow[]>([]);
   const [requestRows, setRequestRows] = useState<CjAllocationRequestRow[]>([]);
   const [allocationRows, setAllocationRows] = useState<CjLotAllocationRow[]>([]);
@@ -369,23 +380,14 @@ export default function CjAllocationClient({
         ) : null}
 
         <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_220px_120px]">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_120px]">
             <label className="text-sm font-medium text-slate-700">
-              SKU
+              Stock SKU search
               <input
                 className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                 onChange={(event) => setSku(event.currentTarget.value)}
                 placeholder="BA00021"
                 value={sku}
-              />
-            </label>
-            <label className="text-sm font-medium text-slate-700">
-              Depot
-              <input
-                className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                onChange={(event) => setDepot(event.currentTarget.value)}
-                placeholder="CJLA 1 Amazon"
-                value={depot}
               />
             </label>
             <button
@@ -422,41 +424,106 @@ export default function CjAllocationClient({
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex flex-col gap-5">
             <div>
-              <h2 className="text-base font-semibold text-slate-950">
-                Request upload and allocation
-              </h2>
+              <h2 className="text-lg font-semibold text-slate-950">CJ outbound</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Accepts columns such as SKU/resource_code, qty/requested_qty, depot,
-                reference. Files are parsed in memory only.
+                Select outbound type, select outbound warehouse, then upload the
+                request file. Files are parsed in memory only.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <input
-                accept=".xlsx,.xls"
-                className="min-h-9 max-w-full text-sm"
-                onChange={(event) =>
-                  void handleFile(event.currentTarget.files?.[0] ?? null)
-                }
-                type="file"
-              />
-              <button
-                className="min-h-9 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={requestRows.length === 0 || isAllocating}
-                onClick={allocate}
-                type="button"
-              >
-                {isAllocating ? "Allocating" : "Allocate"}
-              </button>
-              <button
-                className="min-h-9 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
-                disabled={allocationRows.length === 0}
-                onClick={() => downloadAllocationWorkbook(allocationRows)}
-                type="button"
-              >
-                Export
-              </button>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-xs font-semibold text-white">
+                  1
+                </span>
+                <h3 className="text-base font-semibold text-slate-950">
+                  Outbound type
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {OUTBOUND_TYPES.map((type) => (
+                  <button
+                    className={`min-h-10 rounded-md border px-3 py-2 text-sm font-medium transition ${
+                      outboundType === type
+                        ? "border-slate-950 bg-slate-950 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                    key={type}
+                    onClick={() => setOutboundType(type)}
+                    type="button"
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-xs font-semibold text-white">
+                  2
+                </span>
+                <h3 className="text-base font-semibold text-slate-950">
+                  Outbound warehouse
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {DEPOT_OPTIONS.map((option) => (
+                  <button
+                    className={`min-h-10 rounded-md border px-3 py-2 text-sm font-medium transition ${
+                      depot === option
+                        ? "border-slate-950 bg-slate-950 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                    key={option}
+                    onClick={() => setDepot(option)}
+                    type="button"
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-xs font-semibold text-white">
+                  3
+                </span>
+                <h3 className="text-base font-semibold text-slate-950">
+                  Upload request file
+                </h3>
+              </div>
+              <div className="flex flex-col gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <input
+                  accept=".xlsx,.xls"
+                  className="min-h-9 max-w-full text-sm"
+                  onChange={(event) =>
+                    void handleFile(event.currentTarget.files?.[0] ?? null)
+                  }
+                  type="file"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="min-h-9 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                    disabled={requestRows.length === 0 || isAllocating}
+                    onClick={allocate}
+                    type="button"
+                  >
+                    {isAllocating ? "Allocating" : "Allocate"}
+                  </button>
+                  <button
+                    className="min-h-9 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                    disabled={allocationRows.length === 0}
+                    onClick={() => downloadAllocationWorkbook(allocationRows)}
+                    type="button"
+                  >
+                    Export
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -483,6 +550,9 @@ export default function CjAllocationClient({
               </p>
             </div>
           </div>
+          <p className="mt-3 text-xs text-slate-500">
+            Current selection: {outboundType} / {depot}
+          </p>
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
