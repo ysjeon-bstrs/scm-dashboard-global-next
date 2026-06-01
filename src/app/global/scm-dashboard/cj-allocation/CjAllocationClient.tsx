@@ -1,7 +1,7 @@
 "use client";
 
 import { AllEnterpriseModule, LicenseManager } from "ag-grid-enterprise";
-import { ModuleRegistry, type CellStyle, type ColDef } from "ag-grid-community";
+import { ModuleRegistry, type ColDef } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -20,6 +20,32 @@ import type {
   CjLotStockRow,
 } from "@/lib/scm-dashboard/cjTypes";
 import type { UserSummary } from "@/lib/scm-dashboard/types";
+import {
+  Banner,
+  BrandMark,
+  PageHeader,
+  Panel,
+  PanelHeader,
+  Stat,
+  StatusPill,
+  type Tone,
+} from "@/components/scm-dashboard/ui";
+
+const STATUS_TONE: Record<CjLotAllocationRow["status"], Tone> = {
+  allocated: "ok",
+  partial: "warn",
+  shortage: "danger",
+  unmatched: "neutral",
+};
+
+function StatusCellRenderer({
+  value,
+}: {
+  value?: CjLotAllocationRow["status"];
+}) {
+  if (!value) return null;
+  return <StatusPill tone={STATUS_TONE[value]}>{value}</StatusPill>;
+}
 
 let modulesRegistered = false;
 
@@ -167,23 +193,28 @@ export default function CjAllocationClient({
     () => [
       { field: "close_date", headerName: "Close date", minWidth: 120 },
       { field: "depot_code", headerName: "Depot", minWidth: 130 },
-      { field: "resource_code", headerName: "SKU", minWidth: 120 },
+      {
+        field: "resource_code",
+        headerName: "SKU",
+        minWidth: 120,
+        cellClass: "cell-code",
+      },
       { field: "resource_name", headerName: "Name", minWidth: 220, flex: 1 },
-      { field: "lot_no", headerName: "Lot", minWidth: 120 },
+      { field: "lot_no", headerName: "Lot", minWidth: 120, cellClass: "cell-code" },
       { field: "expiration_date", headerName: "Expiry", minWidth: 120 },
       {
         field: "available_qty",
         headerName: "Available",
         minWidth: 120,
         type: "numericColumn",
-        cellStyle: { textAlign: "right", fontWeight: 600 } as CellStyle,
+        cellClass: "cell-num cell-allocated",
       },
       {
         field: "stock_qty",
         headerName: "Stock",
         minWidth: 110,
         type: "numericColumn",
-        cellStyle: { textAlign: "right" } as CellStyle,
+        cellClass: "cell-num",
       },
     ],
     [],
@@ -193,32 +224,46 @@ export default function CjAllocationClient({
     () => [
       { field: "rowNumber", headerName: "Row", minWidth: 90 },
       { field: "reference", headerName: "Reference", minWidth: 140 },
-      { field: "resource_code", headerName: "SKU", minWidth: 120 },
+      {
+        field: "resource_code",
+        headerName: "SKU",
+        minWidth: 120,
+        cellClass: "cell-code",
+      },
       { field: "depot_code", headerName: "Depot", minWidth: 130 },
-      { field: "lot_no", headerName: "Lot", minWidth: 120 },
+      { field: "lot_no", headerName: "Lot", minWidth: 120, cellClass: "cell-code" },
       { field: "expiration_date", headerName: "Expiry", minWidth: 120 },
       {
         field: "requested_qty",
         headerName: "Request",
         minWidth: 110,
         type: "numericColumn",
-        cellStyle: { textAlign: "right" } as CellStyle,
+        cellClass: "cell-num",
       },
       {
         field: "allocated_qty",
         headerName: "Allocated",
         minWidth: 120,
         type: "numericColumn",
-        cellStyle: { textAlign: "right", fontWeight: 600 } as CellStyle,
+        cellClass: "cell-num cell-allocated",
       },
       {
         field: "shortage_qty",
         headerName: "Shortage",
         minWidth: 120,
         type: "numericColumn",
-        cellStyle: { textAlign: "right" } as CellStyle,
+        cellClass: "cell-num",
+        cellClassRules: {
+          "cell-shortage": (params) => Number(params.value) > 0,
+        },
       },
-      { field: "status", headerName: "Status", minWidth: 120 },
+      {
+        field: "status",
+        headerName: "Status",
+        minWidth: 130,
+        cellClass: "pill-cell",
+        cellRenderer: StatusCellRenderer,
+      },
     ],
     [],
   );
@@ -311,19 +356,20 @@ export default function CjAllocationClient({
   if (!user) {
     return (
       <main className="flex min-h-dvh items-center justify-center px-4 py-12">
-        <section className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-          <p className="text-sm font-medium text-emerald-700">Protected pilot</p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight">
+        <section className="panel w-full max-w-lg p-7 sm:p-9">
+          <BrandMark className="h-10 w-10" />
+          <p className="eyebrow mt-5">Protected pilot</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
             CJ Lot Allocation
           </h1>
-          <p className="mt-3 text-sm leading-6 text-slate-600">
+          <p className="mt-3 text-sm leading-6 text-muted">
             {initialAuthError === "forbidden-domain"
               ? "boosters.kr Google account is required."
               : "Sign in with your boosters.kr Google account."}
           </p>
-          {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+          {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
           <button
-            className="mt-6 min-h-9 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+            className="btn btn-primary mt-6"
             onClick={signInWithGoogle}
             type="button"
           >
@@ -334,80 +380,64 @@ export default function CjAllocationClient({
     );
   }
 
+  const shortageEa = allocationRows.reduce(
+    (sum, row) => sum + row.shortage_qty,
+    0,
+  );
+
   return (
-    <main className="min-h-dvh px-3 py-4 sm:px-5 sm:py-6">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
-        <header className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-medium text-emerald-700">CJ pilot</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
-              CJ Lot Allocation
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              회사 MySQL의 cj_stock을 읽고, 업로드한 요청 수량을 FEFO 기준으로
-              로트 배정합니다. DB에는 쓰지 않습니다.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
-            <Link
-              className="min-h-9 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              href="/global/scm-dashboard"
-            >
-              Dashboard
-            </Link>
-            <span className="max-w-full truncate px-2 text-sm text-slate-600">
-              {user.email}
-            </span>
-            <button
-              className="min-h-9 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              onClick={signOut}
-              type="button"
-            >
-              Sign out
-            </button>
-          </div>
-        </header>
+    <main className="min-h-dvh px-4 py-6 sm:px-6 lg:px-8">
+      <div className="stagger mx-auto flex w-full max-w-7xl flex-col gap-5">
+        <PageHeader
+          actions={
+            <>
+              <Link className="btn btn-secondary" href="/global/scm-dashboard">
+                Dashboard
+              </Link>
+              <span className="max-w-[14rem] truncate px-1 text-sm text-muted">
+                {user.email}
+              </span>
+              <button className="btn btn-secondary" onClick={signOut} type="button">
+                Sign out
+              </button>
+            </>
+          }
+          description="회사 MySQL의 cj_stock을 읽고, 업로드한 요청 수량을 FEFO 기준으로 로트 배정합니다. DB에는 쓰지 않습니다."
+          eyebrow="CJ pilot"
+          title="CJ Lot Allocation"
+        />
 
-        {message ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-            {message}
-          </div>
-        ) : null}
-        {error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        ) : null}
+        {message ? <Banner tone="brand">{message}</Banner> : null}
+        {error ? <Banner tone="danger">{error}</Banner> : null}
 
-        <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_120px]">
-            <label className="text-sm font-medium text-slate-700">
-              Stock SKU search
+        <Panel>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="min-w-0 flex-1">
+              <span className="field-label">Stock SKU search</span>
               <input
-                className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="field mt-1.5 font-mono"
                 onChange={(event) => setSku(event.currentTarget.value)}
                 placeholder="BA00021"
                 value={sku}
               />
             </label>
             <button
-              className="mt-auto min-h-9 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="btn btn-primary sm:w-32"
               disabled={isLoadingStock}
               onClick={loadStock}
               type="button"
             >
-              {isLoadingStock ? "Loading" : "Load"}
+              {isLoadingStock ? "Loading…" : "Load"}
             </button>
           </div>
-        </section>
+        </Panel>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-slate-950">
-              Latest CJ lot stock
-            </h2>
-            <p className="text-xs text-slate-500">{stockRows.length} rows</p>
-          </div>
+        <Panel>
+          <PanelHeader
+            eyebrow="Stock"
+            meta={`${stockRows.length.toLocaleString()} rows`}
+            title="Latest CJ lot stock"
+          />
           <div className="ag-theme-quartz w-full" style={{ height: 420 }}>
             <AgGridReact<CjLotStockRow>
               columnDefs={stockColumnDefs}
@@ -421,35 +451,26 @@ export default function CjAllocationClient({
               rowSelection={{ mode: "multiRow" }}
             />
           </div>
-        </section>
+        </Panel>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="flex flex-col gap-5">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">CJ outbound</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Select outbound type, select outbound warehouse, then upload the
-                request file. Files are parsed in memory only.
-              </p>
-            </div>
+        <Panel>
+          <PanelHeader eyebrow="Outbound" title="CJ outbound allocation" />
+          <p className="-mt-2 mb-5 max-w-2xl text-sm leading-6 text-muted">
+            Pick the outbound type and warehouse, then upload the request file.
+            Files are parsed in memory only — nothing is written back.
+          </p>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-xs font-semibold text-white">
-                  1
-                </span>
-                <h3 className="text-base font-semibold text-slate-950">
-                  Outbound type
-                </h3>
+          <div className="flex flex-col gap-6">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="step-no">1</span>
+                <h3 className="text-sm font-semibold text-ink">Outbound type</h3>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {OUTBOUND_TYPES.map((type) => (
                   <button
-                    className={`min-h-10 rounded-md border px-3 py-2 text-sm font-medium transition ${
-                      outboundType === type
-                        ? "border-slate-950 bg-slate-950 text-white"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
+                    aria-pressed={outboundType === type}
+                    className={`seg ${outboundType === type ? "seg-on" : "seg-off"}`}
                     key={type}
                     onClick={() => setOutboundType(type)}
                     type="button"
@@ -460,23 +481,18 @@ export default function CjAllocationClient({
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-xs font-semibold text-white">
-                  2
-                </span>
-                <h3 className="text-base font-semibold text-slate-950">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="step-no">2</span>
+                <h3 className="text-sm font-semibold text-ink">
                   Outbound warehouse
                 </h3>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {DEPOT_OPTIONS.map((option) => (
                   <button
-                    className={`min-h-10 rounded-md border px-3 py-2 text-sm font-medium transition ${
-                      depot === option
-                        ? "border-slate-950 bg-slate-950 text-white"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
+                    aria-pressed={depot === option}
+                    className={`seg ${depot === option ? "seg-on" : "seg-off"}`}
                     key={option}
                     onClick={() => setDepot(option)}
                     type="button"
@@ -487,19 +503,17 @@ export default function CjAllocationClient({
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-blue-600 text-xs font-semibold text-white">
-                  3
-                </span>
-                <h3 className="text-base font-semibold text-slate-950">
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="step-no">3</span>
+                <h3 className="text-sm font-semibold text-ink">
                   Upload request file
                 </h3>
               </div>
-              <div className="flex flex-col gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-line bg-sunken/60 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <input
                   accept=".xlsx,.xls"
-                  className="min-h-9 max-w-full text-sm"
+                  className="max-w-full text-sm text-muted file:mr-3 file:rounded-md file:border-0 file:bg-brand-soft file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-ink hover:file:bg-brand-softer"
                   onChange={(event) =>
                     void handleFile(event.currentTarget.files?.[0] ?? null)
                   }
@@ -507,15 +521,15 @@ export default function CjAllocationClient({
                 />
                 <div className="flex flex-wrap gap-2">
                   <button
-                    className="min-h-9 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                    className="btn btn-primary"
                     disabled={requestRows.length === 0 || isAllocating}
                     onClick={allocate}
                     type="button"
                   >
-                    {isAllocating ? "Allocating" : "Allocate"}
+                    {isAllocating ? "Allocating…" : "Allocate"}
                   </button>
                   <button
-                    className="min-h-9 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                    className="btn btn-secondary"
                     disabled={allocationRows.length === 0}
                     onClick={() => downloadAllocationWorkbook(allocationRows)}
                     type="button"
@@ -526,42 +540,32 @@ export default function CjAllocationClient({
               </div>
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-md border border-slate-200 p-3">
-              <p className="text-xs font-medium uppercase text-slate-500">
-                Request rows
-              </p>
-              <p className="mt-1 text-2xl font-semibold">{requestRows.length}</p>
-            </div>
-            <div className="rounded-md border border-slate-200 p-3">
-              <p className="text-xs font-medium uppercase text-slate-500">
-                Allocation rows
-              </p>
-              <p className="mt-1 text-2xl font-semibold">{allocationRows.length}</p>
-            </div>
-            <div className="rounded-md border border-slate-200 p-3">
-              <p className="text-xs font-medium uppercase text-slate-500">
-                Shortage EA
-              </p>
-              <p className="mt-1 text-2xl font-semibold">
-                {allocationRows
-                  .reduce((sum, row) => sum + row.shortage_qty, 0)
-                  .toLocaleString()}
-              </p>
-            </div>
-          </div>
-          <p className="mt-3 text-xs text-slate-500">
-            Current selection: {outboundType} / {depot}
-          </p>
-        </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-slate-950">
-              Allocation result
-            </h2>
-            <p className="text-xs text-slate-500">{allocationRows.length} rows</p>
+          <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-line pt-5 sm:grid-cols-3">
+            <Stat label="Request rows" value={requestRows.length.toLocaleString()} />
+            <Stat
+              label="Allocation rows"
+              value={allocationRows.length.toLocaleString()}
+            />
+            <Stat
+              label="Shortage EA"
+              tone={shortageEa > 0 ? "danger" : "ok"}
+              value={shortageEa.toLocaleString()}
+            />
           </div>
+          <p className="mt-4 flex flex-wrap items-center gap-2 text-xs text-faint">
+            Current selection
+            <StatusPill tone="brand">{outboundType}</StatusPill>
+            <StatusPill tone="neutral">{depot}</StatusPill>
+          </p>
+        </Panel>
+
+        <Panel>
+          <PanelHeader
+            eyebrow="Result"
+            meta={`${allocationRows.length.toLocaleString()} rows`}
+            title="Allocation result"
+          />
           <div className="ag-theme-quartz w-full" style={{ height: 360 }}>
             <AgGridReact<CjLotAllocationRow>
               columnDefs={allocationColumnDefs}
@@ -574,7 +578,7 @@ export default function CjAllocationClient({
               rowData={allocationRows}
             />
           </div>
-        </section>
+        </Panel>
       </div>
     </main>
   );

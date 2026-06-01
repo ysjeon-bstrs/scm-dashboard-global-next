@@ -8,6 +8,7 @@ import { ScmFilters } from "@/components/scm-dashboard/ScmFilters";
 import { ScmInventoryGrid } from "@/components/scm-dashboard/ScmInventoryGrid";
 import { ScmKpiCards } from "@/components/scm-dashboard/ScmKpiCards";
 import { ScmTimelineChart } from "@/components/scm-dashboard/ScmTimelineChart";
+import { Banner, BrandMark } from "@/components/scm-dashboard/ui";
 import { SCM_DASHBOARD_API_PATH } from "@/lib/scm-dashboard/constants";
 import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
 import type {
@@ -130,15 +131,18 @@ export default function ScmDashboardClient({
   if (!user) {
     return (
       <main className="flex min-h-dvh items-center justify-center px-4 py-12">
-        <section className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-          <p className="text-sm font-medium text-emerald-700">Protected dashboard</p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight">
+        <section className="panel w-full max-w-lg p-7 sm:p-9">
+          <BrandMark className="h-10 w-10" />
+          <p className="eyebrow mt-5">Protected dashboard</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
             글로벌 SCM Dashboard
           </h1>
-          <p className="mt-3 text-sm leading-6 text-slate-600">{authMessage}</p>
-          {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+          <p className="mt-3 text-sm leading-6 text-muted">{authMessage}</p>
+          {error ? (
+            <p className="mt-4 text-sm text-danger">{error}</p>
+          ) : null}
           <button
-            className="mt-6 min-h-9 rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+            className="btn btn-primary mt-6"
             onClick={signInWithGoogle}
             type="button"
           >
@@ -152,15 +156,9 @@ export default function ScmDashboardClient({
   return (
     <ScmDashboardShell onSignOut={signOut} user={user}>
       {data.notices.length > 0 ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          {data.notices.join(" ")}
-        </div>
+        <Banner tone="warn">{data.notices.join(" ")}</Banner>
       ) : null}
-      {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
+      {error ? <Banner tone="danger">{error}</Banner> : null}
       <ScmFilters
         centerOptions={data.centerOptions}
         filters={filters}
@@ -176,8 +174,9 @@ export default function ScmDashboardClient({
         </div>
       </div>
       {isLoading ? (
-        <div className="fixed bottom-4 right-4 rounded-md bg-slate-950 px-3 py-2 text-sm text-white shadow-lg">
-          Loading dashboard
+        <div className="fixed right-4 bottom-4 flex items-center gap-2 rounded-full bg-ink px-3.5 py-2 text-sm font-medium text-paper shadow-pop">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-on-brand" />
+          Loading dashboard…
         </div>
       ) : null}
     </ScmDashboardShell>

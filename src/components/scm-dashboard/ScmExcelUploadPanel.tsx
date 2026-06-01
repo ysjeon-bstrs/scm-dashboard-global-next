@@ -5,6 +5,7 @@ import { useState } from "react";
 import { SCM_DASHBOARD_ALLOCATION_API_PATH } from "@/lib/scm-dashboard/constants";
 import { exportAllocationWorkbook } from "@/lib/scm-dashboard/excel";
 import type { AllocationResponse, AllocationResultRow } from "@/lib/scm-dashboard/types";
+import { Panel, PanelHeader } from "@/components/scm-dashboard/ui";
 
 function downloadWorkbook(rows: AllocationResultRow[]) {
   const workbook = exportAllocationWorkbook(rows);
@@ -52,31 +53,30 @@ export function ScmExcelUploadPanel() {
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-slate-950">Excel allocation</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Upload rows with SKU, center, and requested quantity. Files are parsed in memory.
-          </p>
-        </div>
+    <Panel>
+      <PanelHeader eyebrow="Allocation" title="Excel allocation" />
+      <p className="-mt-2 mb-3 text-sm leading-6 text-muted">
+        Upload rows with SKU, center, and requested quantity. Files are parsed in
+        memory only.
+      </p>
+      <div className="flex flex-col gap-3 rounded-xl border border-dashed border-line bg-sunken/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <input
+          accept=".xlsx,.xls"
+          className="max-w-full text-sm text-muted file:mr-3 file:rounded-md file:border-0 file:bg-brand-soft file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-ink hover:file:bg-brand-softer"
+          onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
+          type="file"
+        />
         <div className="flex flex-wrap gap-2">
-          <input
-            accept=".xlsx,.xls"
-            className="min-h-9 max-w-full text-sm"
-            onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
-            type="file"
-          />
           <button
-            className="min-h-9 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="btn btn-primary"
             disabled={!file || isUploading}
             onClick={submitFile}
             type="button"
           >
-            {isUploading ? "Processing" : "Calculate"}
+            {isUploading ? "Processing…" : "Calculate"}
           </button>
           <button
-            className="min-h-9 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
+            className="btn btn-secondary"
             disabled={rows.length === 0}
             onClick={() => downloadWorkbook(rows)}
             type="button"
@@ -85,7 +85,7 @@ export function ScmExcelUploadPanel() {
           </button>
         </div>
       </div>
-      {message ? <p className="mt-3 text-sm text-slate-600">{message}</p> : null}
-    </section>
+      {message ? <p className="mt-3 text-sm text-muted">{message}</p> : null}
+    </Panel>
   );
 }

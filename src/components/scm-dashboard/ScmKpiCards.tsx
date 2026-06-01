@@ -1,33 +1,41 @@
 import type { KpiSummary } from "@/lib/scm-dashboard/types";
-
-const kpiLabels: Array<[keyof KpiSummary, string]> = [
-  ["totalInventory", "Total inventory"],
-  ["centerCount", "Selected centers"],
-  ["skuCount", "Selected SKUs"],
-  ["inboundQty", "Inbound/WIP qty"],
-  ["shortageSkuCount", "Risk SKUs"],
-];
+import { Panel, Stat } from "@/components/scm-dashboard/ui";
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(Math.round(value));
 }
 
+const SECONDARY: Array<[keyof KpiSummary, string]> = [
+  ["centerCount", "Selected centers"],
+  ["skuCount", "Selected SKUs"],
+  ["inboundQty", "Inbound / WIP qty"],
+];
+
 export function ScmKpiCards({ kpis }: { kpis: KpiSummary }) {
+  const hasRisk = kpis.shortageSkuCount > 0;
+
   return (
-    <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-      {kpiLabels.map(([key, label]) => (
-        <article
-          className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
-          key={key}
-        >
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            {label}
+    <Panel>
+      <div className="grid gap-6 lg:grid-cols-[1.3fr_3fr] lg:gap-9">
+        <div className="lg:border-r lg:border-line lg:pr-9">
+          <p className="eyebrow">Inventory on hand</p>
+          <p className="mt-3 text-[2.75rem] leading-none font-semibold tracking-tight tabular-nums text-ink">
+            {formatNumber(kpis.totalInventory)}
           </p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-950">
-            {formatNumber(kpis[key])}
-          </p>
-        </article>
-      ))}
-    </section>
+          <p className="mt-2 text-xs text-faint">Total available EA across selection</p>
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
+          {SECONDARY.map(([key, label]) => (
+            <Stat key={key} label={label} value={formatNumber(kpis[key])} />
+          ))}
+          <Stat
+            hint={hasRisk ? "Below safety threshold" : "All within range"}
+            label="Risk SKUs"
+            tone={hasRisk ? "danger" : "ok"}
+            value={formatNumber(kpis.shortageSkuCount)}
+          />
+        </div>
+      </div>
+    </Panel>
   );
 }

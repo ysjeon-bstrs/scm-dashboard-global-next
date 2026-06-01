@@ -1,27 +1,273 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css");
 @import "tailwindcss";
 @import "ag-grid-community/styles/ag-grid.css";
 @import "ag-grid-community/styles/ag-theme-quartz.css";
 
-:root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+/*
+ * SCM Dashboard design tokens — "refined operational instrument".
+ * Light only. Tinted neutrals + a single deep teal-green accent (OKLCH).
+ * See .impeccable.md for the full design context.
+ */
+@theme {
+  /* Tinted neutrals — all share a faint teal-leaning hue (~200-215) */
+  --color-paper: oklch(0.974 0.005 200);
+  --color-surface: oklch(0.998 0.003 200);
+  --color-sunken: oklch(0.955 0.008 200);
+  --color-line: oklch(0.908 0.011 200);
+  --color-line-strong: oklch(0.85 0.014 200);
+
+  --color-ink: oklch(0.27 0.024 215);
+  --color-muted: oklch(0.5 0.02 215);
+  --color-faint: oklch(0.615 0.016 215);
+
+  /* Brand — deep teal-green, used sparingly for action + emphasis */
+  --color-brand: oklch(0.55 0.105 178);
+  --color-brand-strong: oklch(0.47 0.1 180);
+  --color-brand-press: oklch(0.41 0.092 181);
+  --color-brand-soft: oklch(0.952 0.034 180);
+  --color-brand-softer: oklch(0.975 0.018 180);
+  --color-brand-ink: oklch(0.4 0.082 182);
+  --color-on-brand: oklch(0.99 0.012 180);
+
+  /* Status — disciplined three-state allocation system */
+  --color-ok: oklch(0.56 0.11 158);
+  --color-ok-soft: oklch(0.95 0.045 160);
+  --color-ok-ink: oklch(0.42 0.085 160);
+
+  --color-warn: oklch(0.72 0.115 80);
+  --color-warn-soft: oklch(0.957 0.05 85);
+  --color-warn-ink: oklch(0.5 0.09 70);
+
+  --color-danger: oklch(0.575 0.17 25);
+  --color-danger-soft: oklch(0.955 0.035 25);
+  --color-danger-ink: oklch(0.48 0.13 25);
+
+  --color-info: oklch(0.62 0.12 235);
+
+  --font-sans:
+    "Pretendard Variable", Pretendard, ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono:
+    "SFMono-Regular", ui-monospace, "JetBrains Mono", Consolas, monospace;
+
+  --radius-panel: 0.875rem;
+  --shadow-panel:
+    0 1px 2px oklch(0.27 0.024 215 / 0.05),
+    0 10px 28px -18px oklch(0.27 0.05 215 / 0.2);
+  --shadow-pop: 0 16px 44px -20px oklch(0.27 0.05 215 / 0.3);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.018em;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-soft);
+    color: var(--color-brand-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+@layer components {
+  /* Surface — the single source of the "card" look. Never nest these. */
+  .panel {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .eyebrow {
+    @apply text-[0.6875rem] font-semibold tracking-[0.16em] text-brand uppercase;
+  }
+
+  .field-label {
+    @apply text-[0.6875rem] font-semibold tracking-[0.08em] text-faint uppercase;
+  }
+
+  /* Buttons — hierarchy matters; primary is rare, ghost/secondary do the work. */
+  .btn {
+    @apply inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium transition duration-150 select-none;
+  }
+  .btn:disabled {
+    @apply cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply bg-brand-strong text-on-brand shadow-sm hover:bg-brand-press;
+  }
+  .btn-primary:disabled {
+    @apply bg-sunken text-faint shadow-none;
+  }
+  .btn-secondary {
+    @apply border border-line bg-surface text-ink hover:bg-sunken;
+  }
+  .btn-secondary:disabled {
+    @apply text-faint;
+  }
+  .btn-ghost {
+    @apply text-muted hover:bg-sunken hover:text-ink;
+  }
+
+  .field {
+    @apply min-h-9 w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink shadow-sm transition placeholder:text-faint;
+  }
+  .field:focus,
+  .field:focus-visible {
+    @apply border-brand ring-2 ring-brand/25 outline-none;
+  }
+
+  /* Status pills — color is meaning. */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .pill-neutral {
+    @apply bg-sunken text-muted;
+  }
+  .pill-brand {
+    @apply bg-brand-soft text-brand-ink;
+  }
+  .pill-ok {
+    @apply bg-ok-soft text-ok-ink;
+  }
+  .pill-warn {
+    @apply bg-warn-soft text-warn-ink;
+  }
+  .pill-danger {
+    @apply bg-danger-soft text-danger-ink;
+  }
+
+  /* Segmented selectors (outbound type / warehouse) */
+  .seg {
+    @apply inline-flex min-h-10 cursor-pointer items-center justify-center rounded-lg border px-3 text-sm font-medium transition duration-150;
+  }
+  .seg-on {
+    @apply border-brand-strong bg-brand-strong text-on-brand shadow-sm;
+  }
+  .seg-off {
+    @apply border-line bg-surface text-muted hover:border-line-strong hover:text-ink;
+  }
+
+  /* Step index marker */
+  .step-no {
+    @apply inline-flex h-6 w-6 items-center justify-center rounded-full bg-brand-soft text-xs font-bold text-brand-ink tabular-nums;
+  }
 }
 
-button,
-input,
-select {
-  font: inherit;
+/* AG Grid — align the Quartz theme with the palette. */
+.ag-theme-quartz {
+  --ag-font-family: var(--font-sans);
+  --ag-font-size: 13px;
+  --ag-foreground-color: var(--color-ink);
+  --ag-background-color: var(--color-surface);
+  --ag-header-background-color: var(--color-sunken);
+  --ag-header-foreground-color: var(--color-muted);
+  --ag-border-color: var(--color-line);
+  --ag-row-border-color: var(--color-line);
+  --ag-odd-row-background-color: var(--color-brand-softer);
+  --ag-row-hover-color: var(--color-brand-soft);
+  --ag-selected-row-background-color: var(--color-brand-soft);
+  --ag-accent-color: var(--color-brand);
+  --ag-input-focus-border-color: var(--color-brand);
+  --ag-wrapper-border-radius: 12px;
+  --ag-border-radius: 8px;
+  --ag-header-column-resize-handle-color: var(--color-line-strong);
+}
+
+.ag-theme-quartz .ag-header-cell-text {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Allocation status accents inside grids */
+.ag-theme-quartz .cell-num {
+  font-variant-numeric: tabular-nums;
+}
+.ag-theme-quartz .cell-shortage {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+.ag-theme-quartz .cell-allocated {
+  color: var(--color-ok-ink);
+  font-weight: 600;
+}
+.ag-theme-quartz .cell-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+.ag-theme-quartz .ag-cell.pill-cell {
+  display: flex;
+  align-items: center;
+}
+
+/* One quiet, orchestrated page entrance — reduced-motion safe. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise {
+    animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Staggered reveal of a container's direct children on load. */
+  .stagger > * {
+    animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .stagger > *:nth-child(1) {
+    animation-delay: 0.02s;
+  }
+  .stagger > *:nth-child(2) {
+    animation-delay: 0.07s;
+  }
+  .stagger > *:nth-child(3) {
+    animation-delay: 0.12s;
+  }
+  .stagger > *:nth-child(4) {
+    animation-delay: 0.17s;
+  }
+  .stagger > *:nth-child(5) {
+    animation-delay: 0.22s;
+  }
+  .stagger > *:nth-child(6) {
+    animation-delay: 0.27s;
+  }
+  .stagger > *:nth-child(n + 7) {
+    animation-delay: 0.32s;
+  }
 }

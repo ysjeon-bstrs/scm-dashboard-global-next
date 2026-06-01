@@ -6,6 +6,7 @@ import { AgGridReact } from "ag-grid-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { InventorySnapshotRow } from "@/lib/scm-dashboard/types";
+import { Panel, PanelHeader } from "@/components/scm-dashboard/ui";
 
 let modulesRegistered = false;
 
@@ -75,11 +76,12 @@ export function ScmInventoryGrid({ rows }: { rows: InventorySnapshotRow[] }) {
   );
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-slate-950">Inventory table</h2>
-        <p className="text-xs text-slate-500">{rows.length} rows</p>
-      </div>
+    <Panel>
+      <PanelHeader
+        eyebrow="Snapshot"
+        meta={`${rows.length.toLocaleString()} rows`}
+        title="Inventory table"
+      />
       <div className="ag-theme-quartz w-full" style={{ height }}>
         <AgGridReact<InventorySnapshotRow>
           columnDefs={columnDefs}
@@ -93,6 +95,6 @@ export function ScmInventoryGrid({ rows }: { rows: InventorySnapshotRow[] }) {
           rowSelection={{ mode: "multiRow" }}
         />
       </div>
-    </section>
+    </Panel>
   );
 }

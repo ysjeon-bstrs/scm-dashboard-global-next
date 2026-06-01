@@ -1,6 +1,7 @@
 "use client";
 
 import type { DashboardFilters } from "@/lib/scm-dashboard/types";
+import { Panel } from "@/components/scm-dashboard/ui";
 
 interface ScmFiltersProps {
   centerOptions: string[];
@@ -22,12 +23,12 @@ export function ScmFilters({
   onChange,
 }: ScmFiltersProps) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-        <label className="min-w-0 flex-1 text-sm font-medium text-slate-700">
-          Center
+    <Panel>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+        <label className="min-w-0 flex-1">
+          <span className="field-label">Center</span>
           <select
-            className="mt-1 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600"
+            className="field mt-1.5 min-h-28 py-2"
             multiple
             onChange={(event) =>
               onChange({
@@ -44,10 +45,10 @@ export function ScmFilters({
             ))}
           </select>
         </label>
-        <label className="min-w-0 flex-1 text-sm font-medium text-slate-700">
-          SKU
+        <label className="min-w-0 flex-1">
+          <span className="field-label">SKU</span>
           <select
-            className="mt-1 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600"
+            className="field mt-1.5 min-h-28 py-2"
             multiple
             onChange={(event) =>
               onChange({
@@ -65,10 +66,10 @@ export function ScmFilters({
           </select>
         </label>
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:w-80">
-          <label className="text-sm font-medium text-slate-700">
-            From
+          <label>
+            <span className="field-label">From</span>
             <input
-              className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+              className="field mt-1.5"
               onChange={(event) =>
                 onChange({ ...filters, dateFrom: event.currentTarget.value || null })
               }
@@ -76,10 +77,10 @@ export function ScmFilters({
               value={filters.dateFrom ?? ""}
             />
           </label>
-          <label className="text-sm font-medium text-slate-700">
-            To
+          <label>
+            <span className="field-label">To</span>
             <input
-              className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+              className="field mt-1.5"
               onChange={(event) =>
                 onChange({ ...filters, dateTo: event.currentTarget.value || null })
               }
@@ -87,10 +88,10 @@ export function ScmFilters({
               value={filters.dateTo ?? ""}
             />
           </label>
-          <label className="flex min-h-9 items-center gap-2 text-sm font-medium text-slate-700">
+          <label className="flex min-h-9 items-center gap-2 self-end text-sm font-medium text-ink">
             <input
               checked={filters.useTrendForecast}
-              className="h-4 w-4"
+              className="h-4 w-4 accent-brand"
               onChange={(event) =>
                 onChange({
                   ...filters,
@@ -101,10 +102,10 @@ export function ScmFilters({
             />
             Trend forecast
           </label>
-          <label className="text-sm font-medium text-slate-700">
-            Lookback days
+          <label>
+            <span className="field-label">Lookback days</span>
             <input
-              className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+              className="field mt-1.5 tabular-nums"
               min={1}
               onChange={(event) =>
                 onChange({
@@ -118,6 +119,6 @@ export function ScmFilters({
           </label>
         </div>
       </div>
-    </section>
+    </Panel>
   );
 }
