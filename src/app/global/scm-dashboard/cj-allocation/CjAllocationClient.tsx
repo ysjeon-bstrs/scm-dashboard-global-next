@@ -118,6 +118,19 @@ function downloadAllocationWorkbook(rows: CjLotAllocationRow[]) {
   XLSX.writeFile(workbook, "cj-allocation-result.xlsx");
 }
 
+async function getApiErrorMessage(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as { error?: unknown };
+    if (typeof payload.error === "string" && payload.error.trim()) {
+      return `${fallback}: ${payload.error}`;
+    }
+  } catch {
+    // Fall through to the generic status message.
+  }
+
+  return `${fallback}: ${response.status}`;
+}
+
 interface CjAllocationClientProps {
   user: UserSummary | null;
   initialAuthError: "unauthenticated" | "forbidden-domain" | null;
@@ -214,7 +227,7 @@ export default function CjAllocationClient({
     );
 
     if (!response.ok) {
-      setError(`CJ lot stock API failed with ${response.status}.`);
+      setError(await getApiErrorMessage(response, "CJ lot stock API failed"));
       setIsLoadingStock(false);
       return;
     }
@@ -273,7 +286,7 @@ export default function CjAllocationClient({
     });
 
     if (!response.ok) {
-      setError(`CJ allocation API failed with ${response.status}.`);
+      setError(await getApiErrorMessage(response, "CJ allocation API failed"));
       setIsAllocating(false);
       return;
     }
