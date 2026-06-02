@@ -12,17 +12,20 @@ import {
   SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH,
 } from "@/lib/scm-dashboard/constants";
 import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
+import { summarizeCjStock } from "@/lib/scm-dashboard/cjSummary";
 import type {
   CjAllocationRequestRow,
   CjAllocationResponse,
   CjLotAllocationRow,
   CjLotStockResponse,
   CjLotStockRow,
+  CjStockSummaryRow,
 } from "@/lib/scm-dashboard/cjTypes";
 import type { UserSummary } from "@/lib/scm-dashboard/types";
 import {
   Banner,
   BrandMark,
+  Collapsible,
   GridFrame,
   PageHeader,
   Panel,
@@ -205,17 +208,11 @@ export default function CjAllocationClient({
       { field: "expiration_date", headerName: "Expiry", minWidth: 120 },
       {
         field: "available_qty",
-        headerName: "Available",
-        minWidth: 120,
+        headerName: "가용수량",
+        headerTooltip: "CJ 가용수량 (EA)",
+        minWidth: 130,
         type: "numericColumn",
         cellClass: "cell-num cell-allocated",
-      },
-      {
-        field: "stock_qty",
-        headerName: "Stock",
-        minWidth: 110,
-        type: "numericColumn",
-        cellClass: "cell-num",
       },
     ],
     [],
@@ -269,14 +266,84 @@ export default function CjAllocationClient({
     [],
   );
 
+  const summary = useMemo(() => summarizeCjStock(stockRows), [stockRows]);
+
+  const summaryColumnDefs = useMemo<ColDef<CjStockSummaryRow>[]>(
+    () => [
+      {
+        field: "resource_code",
+        headerName: "품번",
+        minWidth: 120,
+        cellClass: "cell-code",
+      },
+      { field: "resource_name", headerName: "상품명", minWidth: 240, flex: 1 },
+      { field: "expiration_date", headerName: "유통기한", minWidth: 120 },
+      {
+        field: "available_qty",
+        headerName: "가용재고",
+        headerTooltip: "전 센터 합산 가용재고 (EA)",
+        minWidth: 120,
+        type: "numericColumn",
+        cellClass: "cell-num cell-allocated",
+      },
+      {
+        field: "lot_count",
+        headerName: "로트수",
+        minWidth: 90,
+        type: "numericColumn",
+        cellClass: "cell-num",
+      },
+      {
+        field: "units_per_box",
+        headerName: "입수량",
+        headerTooltip: "박스당 입수 수량 (마스터)",
+        minWidth: 110,
+        type: "numericColumn",
+        cellClass: "cell-num",
+        cellClassRules: {
+          "cell-shortage": (params) => params.value == null,
+        },
+        valueFormatter: (params) =>
+          params.value == null ? "미등록" : Number(params.value).toLocaleString(),
+      },
+      {
+        field: "full_boxes",
+        headerName: "가능박스",
+        headerTooltip: "⌊가용재고 / 입수량⌋",
+        minWidth: 110,
+        type: "numericColumn",
+        cellClass: "cell-num",
+        valueFormatter: (params) =>
+          params.value == null ? "—" : Number(params.value).toLocaleString(),
+      },
+      {
+        field: "loose_units",
+        headerName: "잔여(낱개)",
+        minWidth: 110,
+        type: "numericColumn",
+        cellClass: "cell-num",
+      },
+      {
+        field: "est_pallets",
+        headerName: "예상 팔렛",
+        headerTooltip: "가용재고 / 파렛트당 EA (추정)",
+        minWidth: 110,
+        type: "numericColumn",
+        cellClass: "cell-num",
+        valueFormatter: (params) =>
+          params.value == null ? "—" : Number(params.value).toFixed(1),
+      },
+    ],
+    [],
+  );
+
   const loadStock = useCallback(async () => {
     if (!user) return;
 
     setIsLoadingStock(true);
     setError(null);
-    const params = new URLSearchParams({ limit: "300", latestOnly: "true" });
+    const params = new URLSearchParams({ limit: "500", latestOnly: "true" });
     if (sku.trim()) params.set("sku", sku.trim());
-    if (depot.trim()) params.set("depot", depot.trim());
 
     const response = await fetch(
       `${SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH}?${params.toString()}`,
@@ -291,9 +358,9 @@ export default function CjAllocationClient({
 
     const payload = (await response.json()) as CjLotStockResponse;
     setStockRows(payload.rows);
-    setMessage(`Loaded ${payload.rows.length.toLocaleString()} CJ lot rows.`);
+    setMessage(`${payload.rows.length.toLocaleString()}개 로트 로드 완료 (전 센터).`);
     setIsLoadingStock(false);
-  }, [depot, sku, user]);
+  }, [sku, user]);
 
   useEffect(() => {
     // CJ stock rows are synchronized with protected API state.
@@ -403,7 +470,7 @@ export default function CjAllocationClient({
               </button>
             </>
           }
-          description="회사 MySQL의 cj_stock을 읽고, 업로드한 요청 수량을 FEFO 기준으로 로트 배정합니다. DB에는 쓰지 않습니다."
+          description="회사 MySQL의 cj_stock(가용재고)을 상품 마스터(입수량)와 합쳐 SKU·유통기한별로 요약하고, 업로드한 요청 수량을 FEFO로 로트 배정합니다. DB에는 쓰지 않습니다."
           eyebrow="CJ pilot"
           title="CJ Lot Allocation"
         />
@@ -434,12 +501,60 @@ export default function CjAllocationClient({
         </Panel>
 
         <Panel>
+          <div className="grid gap-6 lg:grid-cols-[1.3fr_3fr] lg:gap-9">
+            <div className="lg:border-r lg:border-line lg:pr-9">
+              <p className="eyebrow">CJ 가용재고</p>
+              <p className="mt-3 text-[2.75rem] leading-none font-semibold tracking-tight tabular-nums text-ink">
+                {summary.kpis.totalAvailable.toLocaleString()}
+              </p>
+              <p className="mt-2 text-xs text-faint">전 센터 합계 (EA)</p>
+            </div>
+            <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+              <Stat label="품목수" value={summary.kpis.skuCount.toLocaleString()} />
+              <Stat label="로트수" value={summary.kpis.lotCount.toLocaleString()} />
+              <Stat label="센터수" value={summary.kpis.depotCount.toLocaleString()} />
+            </div>
+          </div>
+        </Panel>
+
+        {summary.unregisteredSkus.length > 0 ? (
+          <Banner tone="warn">
+            입수량 미등록 {summary.unregisteredSkus.length}개 SKU — 박스 환산 불가:{" "}
+            {summary.unregisteredSkus.slice(0, 8).join(", ")}
+            {summary.unregisteredSkus.length > 8 ? " 외" : ""}
+          </Banner>
+        ) : null}
+
+        <Panel>
           <PanelHeader
-            eyebrow="Stock"
-            meta={`${stockRows.length.toLocaleString()} rows`}
-            title="Latest CJ lot stock"
+            eyebrow="Summary"
+            meta={`${summary.rows.length.toLocaleString()} groups`}
+            title="SKU · 유통기한 요약"
           />
-          <GridFrame height={420}>
+          <p className="-mt-2 mb-3 text-sm text-muted">
+            SKU+유통기한으로 묶어 가용재고를 박스·팔렛으로 환산합니다. 각 행은 전
+            센터 합산이라 팔렛 수는 추정치입니다.
+          </p>
+          <GridFrame height={440}>
+            <AgGridReact<CjStockSummaryRow>
+              autoSizeStrategy={{ type: "fitGridWidth" }}
+              columnDefs={summaryColumnDefs}
+              defaultColDef={{
+                filter: true,
+                floatingFilter: true,
+                resizable: true,
+                sortable: true,
+              }}
+              rowData={summary.rows}
+            />
+          </GridFrame>
+        </Panel>
+
+        <Collapsible
+          meta={`${stockRows.length.toLocaleString()} lots`}
+          title="로트별 재고 현황 (전체)"
+        >
+          <div className="ag-theme-quartz w-full" style={{ height: 420 }}>
             <AgGridReact<CjLotStockRow>
               autoSizeStrategy={{ type: "fitGridWidth" }}
               columnDefs={stockColumnDefs}
@@ -452,8 +567,8 @@ export default function CjAllocationClient({
               rowData={stockRows}
               rowSelection={{ mode: "multiRow" }}
             />
-          </GridFrame>
-        </Panel>
+          </div>
+        </Collapsible>
 
         <Panel>
           <PanelHeader eyebrow="Outbound" title="CJ outbound allocation" />

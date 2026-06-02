@@ -13,6 +13,10 @@ export interface CjLotStockDbRow {
   avlbCnt: number;
   holdCnt: number;
   allocCnt: number;
+  // Joined from the item master (scm_global_move_master_item).
+  box_count: number | null;
+  full_pallet_box_count: number | null;
+  pallet_load_count: number | null;
 }
 
 export interface CjLotStockRow {
@@ -30,6 +34,24 @@ export interface CjLotStockRow {
   available_qty: number;
   hold_qty: number;
   allocated_qty: number;
+  // Packaging master. null = SKU has no master 입수량 registered.
+  units_per_box: number | null;
+  boxes_per_pallet: number | null;
+  units_per_pallet: number | null;
+}
+
+/** One SKU + expiry group, aggregated across centers, with box/pallet conversion. */
+export interface CjStockSummaryRow {
+  resource_code: string;
+  resource_name: string;
+  expiration_date: string | null;
+  available_qty: number;
+  lot_count: number;
+  units_per_box: number | null;
+  full_boxes: number | null;
+  loose_units: number;
+  est_pallets: number | null;
+  box_status: "boxed" | "loose-only" | "unregistered";
 }
 
 export interface CjLotStockResponse {

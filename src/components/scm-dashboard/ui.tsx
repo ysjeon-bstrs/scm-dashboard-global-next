@@ -173,6 +173,49 @@ export function Stat({ label, value, tone = "neutral", hint }: StatProps) {
   );
 }
 
+/** Collapsible panel (native details) for secondary content like raw rows. */
+export function Collapsible({
+  title,
+  meta,
+  defaultOpen = false,
+  children,
+}: {
+  title: ReactNode;
+  meta?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details className="panel group overflow-hidden" open={defaultOpen}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 select-none sm:p-5 [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-2.5">
+          <svg
+            aria-hidden
+            className="text-faint transition-transform duration-200 group-open:rotate-90"
+            fill="none"
+            height="14"
+            viewBox="0 0 16 16"
+            width="14"
+          >
+            <path
+              d="M6 4l4 4-4 4"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.8"
+            />
+          </svg>
+          <span className="text-[0.95rem] font-semibold text-ink">{title}</span>
+        </span>
+        {meta != null ? (
+          <span className="text-xs font-medium tabular-nums text-faint">{meta}</span>
+        ) : null}
+      </summary>
+      <div className="border-t border-line p-4 sm:p-5">{children}</div>
+    </details>
+  );
+}
+
 /** Banner for notices / errors. */
 export function Banner({
   tone = "brand",

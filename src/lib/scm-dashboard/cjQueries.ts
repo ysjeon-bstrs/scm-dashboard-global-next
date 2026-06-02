@@ -29,6 +29,12 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function toNullableNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 export function mapCjLotStockRow(row: CjLotStockDbRow): CjLotStockRow {
   return {
     created_at: toDateTimeString(row.created_at),
@@ -45,6 +51,9 @@ export function mapCjLotStockRow(row: CjLotStockDbRow): CjLotStockRow {
     available_qty: toNumber(row.avlbCnt),
     hold_qty: toNumber(row.holdCnt),
     allocated_qty: toNumber(row.allocCnt),
+    units_per_box: toNullableNumber(row.box_count),
+    boxes_per_pallet: toNullableNumber(row.full_pallet_box_count),
+    units_per_pallet: toNullableNumber(row.pallet_load_count),
   };
 }
 
@@ -64,15 +73,19 @@ export async function fetchCjLotStocks({
   latestOnly,
 }: FetchCjLotStockOptions) {
   const tableName = getSafeMysqlIdentifier("SCM_MYSQL_CJ_STOCK_TABLE", "cj_stock");
+  const masterTable = getSafeMysqlIdentifier(
+    "SCM_MYSQL_ITEM_MASTER_TABLE",
+    "scm_global_move_master_item",
+  );
   const where: string[] = [];
   const params: Record<string, string | number> = { limit };
 
   if (latestOnly) {
-    where.push(`closeDt = (SELECT MAX(closeDt) FROM ${tableName})`);
+    where.push(`s.closeDt = (SELECT MAX(closeDt) FROM ${tableName})`);
   }
 
   if (sku) {
-    where.push("prodCd = :sku");
+    where.push("s.prodCd = :sku");
     params.sku = sku;
   }
 
@@ -81,36 +94,40 @@ export async function fetchCjLotStocks({
   );
   if (!sku && uniqueSkus.length > 0) {
     const placeholders = uniqueSkus.map((_, index) => `:sku${index}`);
-    where.push(`prodCd IN (${placeholders.join(", ")})`);
+    where.push(`s.prodCd IN (${placeholders.join(", ")})`);
     uniqueSkus.forEach((value, index) => {
       params[`sku${index}`] = value;
     });
   }
 
   if (depot) {
-    where.push("depotCd = :depot");
+    where.push("s.depotCd = :depot");
     params.depot = depot;
   }
 
   const sql = `
     SELECT
-      created_at,
-      updated_at,
-      closeDt,
-      depotCd,
-      prodLotNo,
-      prodDt,
-      ValidDim,
-      prodCd,
-      ProdNm,
-      prodBrcd,
-      stockCnt,
-      avlbCnt,
-      holdCnt,
-      allocCnt
-    FROM ${tableName}
+      s.created_at,
+      s.updated_at,
+      s.closeDt,
+      s.depotCd,
+      s.prodLotNo,
+      s.prodDt,
+      s.ValidDim,
+      s.prodCd,
+      s.ProdNm,
+      s.prodBrcd,
+      s.stockCnt,
+      s.avlbCnt,
+      s.holdCnt,
+      s.allocCnt,
+      m.box_count,
+      m.full_pallet_box_count,
+      m.pallet_load_count
+    FROM ${tableName} s
+    LEFT JOIN ${masterTable} m ON m.product_code = s.prodCd
     ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
-    ORDER BY prodCd ASC, ValidDim ASC, prodLotNo ASC
+    ORDER BY s.prodCd ASC, s.ValidDim ASC, s.prodLotNo ASC
     LIMIT :limit
   `;
 
