@@ -65,65 +65,77 @@ function registerAgGrid() {
   }
 }
 
-function getStringCell(row: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = row[key];
-    if (value !== undefined && value !== null && String(value).trim()) {
-      return String(value).trim();
-    }
+// Fuzzy header matching — CJ/order files vary in column naming, so resolve by
+// pattern (priority order) instead of exact key match.
+const SKU_PATTERNS = [
+  /^resource_code$/i,
+  /품목\s*코드/,
+  /상품\s*코드/,
+  /^sku$/i,
+  /product[_\s]?code/i,
+  /^prod[_\s]?cd$/i,
+  /품번/,
+  /자재\s*코드/,
+];
+const QTY_PATTERNS = [
+  /요청\s*수량/,
+  /출고\s*수량/,
+  /주문\s*수량/,
+  /requested?[_\s]?qty/i,
+  /quantity/i,
+  /^qty$/i,
+  /수량/,
+  /^ea$/i,
+];
+const NAME_PATTERNS = [/품목$/, /상품\s*명/, /품목\s*명/, /product\s*name/i, /^name$/i, /prodnm/i];
+const REF_PATTERNS = [/참조/, /reference/i, /주문\s*번호/, /오더/, /shipment/i, /^order/i, /fba/i];
+
+function resolveColumn(columns: string[], patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const hit = columns.find((column) => pattern.test(column.trim()));
+    if (hit) return hit;
   }
-  return "";
+  return null;
 }
 
-function getNumberCell(row: Record<string, unknown>, keys: string[]) {
-  const value = getStringCell(row, keys).replace(/,/g, "");
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+interface ParsedWorkbook {
+  columns: string[];
+  raw: Record<string, unknown>[];
+  rows: CjAllocationRequestRow[];
+  mapping: { sku: string | null; qty: string | null };
 }
 
-async function parseRequestWorkbook(file: File): Promise<CjAllocationRequestRow[]> {
+async function parseRequestWorkbook(file: File): Promise<ParsedWorkbook> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer);
   const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-  const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
+  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
     defval: "",
   });
 
-  return records
+  const columns = raw.length > 0 ? Object.keys(raw[0]) : [];
+  const skuCol = resolveColumn(columns, SKU_PATTERNS);
+  const qtyCol = resolveColumn(columns, QTY_PATTERNS);
+  const nameCol = resolveColumn(columns, NAME_PATTERNS);
+  const refCol = resolveColumn(columns, REF_PATTERNS);
+
+  const cell = (record: Record<string, unknown>, col: string | null) =>
+    col ? String(record[col] ?? "").trim() : "";
+
+  const rows = raw
     .map((record, index) => ({
       rowNumber: index + 2,
-      resource_code: getStringCell(record, [
-        "resource_code",
-        "SKU",
-        "sku",
-        "prodCd",
-        "prod_cd",
-        "상품코드",
-      ]),
-      resource_name: getStringCell(record, [
-        "resource_name",
-        "name",
-        "ProdNm",
-        "상품명",
-      ]),
-      requested_qty: getNumberCell(record, [
-        "requested_qty",
-        "qty",
-        "quantity",
-        "출고수량",
-        "요청수량",
-        "수량",
-      ]),
-      depot_code: getStringCell(record, ["depot_code", "depotCd", "depot", "센터"]),
-      reference: getStringCell(record, [
-        "reference",
-        "shipment_id",
-        "shipment",
-        "FBA",
-        "참조",
-      ]),
+      resource_code: cell(record, skuCol),
+      resource_name: cell(record, nameCol),
+      requested_qty: Number(cell(record, qtyCol).replace(/,/g, "")) || 0,
+      // Outbound warehouse comes from the UI selection, not the file — the
+      // file's 배송센터 is the Amazon destination FC, not a CJ depot.
+      depot_code: "",
+      reference: cell(record, refCol),
     }))
     .filter((row) => row.resource_code && row.requested_qty > 0);
+
+  return { columns, raw, rows, mapping: { sku: skuCol, qty: qtyCol } };
 }
 
 function downloadAllocationWorkbook(rows: CjLotAllocationRow[]) {
@@ -188,6 +200,8 @@ export default function CjAllocationClient({
   const [depot, setDepot] = useState<string>("CJLA 1 Amazon");
   const [stockRows, setStockRows] = useState<CjLotStockRow[]>([]);
   const [requestRows, setRequestRows] = useState<CjAllocationRequestRow[]>([]);
+  const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
+  const [previewColumns, setPreviewColumns] = useState<string[]>([]);
   const [allocationRows, setAllocationRows] = useState<CjLotAllocationRow[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -340,6 +354,17 @@ export default function CjAllocationClient({
     [],
   );
 
+  const previewColumnDefs = useMemo<ColDef<Record<string, unknown>>[]>(
+    () =>
+      previewColumns.map((column) => ({
+        field: column,
+        headerName: column,
+        minWidth: 110,
+        flex: 1,
+      })),
+    [previewColumns],
+  );
+
   const loadStock = useCallback(async () => {
     if (!user) return;
 
@@ -393,10 +418,24 @@ export default function CjAllocationClient({
   async function handleFile(file: File | null) {
     if (!file) return;
     setError(null);
-    const rows = await parseRequestWorkbook(file);
+    const { columns, raw, rows, mapping } = await parseRequestWorkbook(file);
+    setPreviewRows(raw);
+    setPreviewColumns(columns);
     setRequestRows(rows);
     setAllocationRows([]);
-    setMessage(`Parsed ${rows.length.toLocaleString()} valid request rows.`);
+
+    if (raw.length === 0) {
+      setMessage("파일에서 행을 읽지 못했습니다.");
+    } else if (rows.length === 0) {
+      setError(
+        `파일 ${raw.length.toLocaleString()}행을 읽었지만 SKU/수량 컬럼을 자동 인식하지 못했습니다. 감지된 컬럼: ${columns.join(", ")}`,
+      );
+      setMessage(null);
+    } else {
+      setMessage(
+        `파일 ${raw.length.toLocaleString()}행 · 유효 요청 ${rows.length.toLocaleString()}행 (SKU="${mapping.sku}", 수량="${mapping.qty}").`,
+      );
+    }
   }
 
   async function allocate() {
@@ -669,6 +708,34 @@ export default function CjAllocationClient({
                 </div>
               </div>
             </div>
+
+            {previewRows.length > 0 ? (
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="step-no">✓</span>
+                  <h3 className="text-sm font-semibold text-ink">업로드 미리보기</h3>
+                  <span className="text-xs text-faint">
+                    {previewRows.length.toLocaleString()}행 · 유효 요청{" "}
+                    {requestRows.length.toLocaleString()}행
+                  </span>
+                </div>
+                <div
+                  className="ag-theme-quartz w-full overflow-hidden rounded-xl border border-line"
+                  style={{ height: 300 }}
+                >
+                  <AgGridReact<Record<string, unknown>>
+                    autoSizeStrategy={{ type: "fitGridWidth" }}
+                    columnDefs={previewColumnDefs}
+                    defaultColDef={{
+                      filter: true,
+                      resizable: true,
+                      sortable: true,
+                    }}
+                    rowData={previewRows}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-line pt-5 sm:grid-cols-3">
