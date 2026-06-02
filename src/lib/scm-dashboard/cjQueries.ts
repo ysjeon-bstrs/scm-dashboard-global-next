@@ -125,7 +125,9 @@ export async function fetchCjLotStocks({
       m.full_pallet_box_count,
       m.pallet_load_count
     FROM ${tableName} s
-    LEFT JOIN ${masterTable} m ON m.product_code = s.prodCd
+    LEFT JOIN ${masterTable} m
+      ON m.product_code COLLATE utf8mb4_unicode_ci
+       = s.prodCd COLLATE utf8mb4_unicode_ci
     ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY s.prodCd ASC, s.ValidDim ASC, s.prodLotNo ASC
     LIMIT :limit
