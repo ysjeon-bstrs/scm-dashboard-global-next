@@ -6,7 +6,7 @@ import { AgGridReact } from "ag-grid-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { InventorySnapshotRow } from "@/lib/scm-dashboard/types";
-import { Panel, PanelHeader } from "@/components/scm-dashboard/ui";
+import { GridFrame, Panel, PanelHeader } from "@/components/scm-dashboard/ui";
 
 let modulesRegistered = false;
 
@@ -82,8 +82,9 @@ export function ScmInventoryGrid({ rows }: { rows: InventorySnapshotRow[] }) {
         meta={`${rows.length.toLocaleString()} rows`}
         title="Inventory table"
       />
-      <div className="ag-theme-quartz w-full" style={{ height }}>
+      <GridFrame height={height}>
         <AgGridReact<InventorySnapshotRow>
+          autoSizeStrategy={{ type: "fitGridWidth" }}
           columnDefs={columnDefs}
           defaultColDef={{
             filter: true,
@@ -94,7 +95,7 @@ export function ScmInventoryGrid({ rows }: { rows: InventorySnapshotRow[] }) {
           rowData={rows}
           rowSelection={{ mode: "multiRow" }}
         />
-      </div>
+      </GridFrame>
     </Panel>
   );
 }

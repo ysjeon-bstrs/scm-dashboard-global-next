@@ -23,6 +23,7 @@ import type { UserSummary } from "@/lib/scm-dashboard/types";
 import {
   Banner,
   BrandMark,
+  GridFrame,
   PageHeader,
   Panel,
   PanelHeader,
@@ -438,8 +439,9 @@ export default function CjAllocationClient({
             meta={`${stockRows.length.toLocaleString()} rows`}
             title="Latest CJ lot stock"
           />
-          <div className="ag-theme-quartz w-full" style={{ height: 420 }}>
+          <GridFrame height={420}>
             <AgGridReact<CjLotStockRow>
+              autoSizeStrategy={{ type: "fitGridWidth" }}
               columnDefs={stockColumnDefs}
               defaultColDef={{
                 filter: true,
@@ -450,7 +452,7 @@ export default function CjAllocationClient({
               rowData={stockRows}
               rowSelection={{ mode: "multiRow" }}
             />
-          </div>
+          </GridFrame>
         </Panel>
 
         <Panel>
@@ -566,8 +568,9 @@ export default function CjAllocationClient({
             meta={`${allocationRows.length.toLocaleString()} rows`}
             title="Allocation result"
           />
-          <div className="ag-theme-quartz w-full" style={{ height: 360 }}>
+          <GridFrame height={360}>
             <AgGridReact<CjLotAllocationRow>
+              autoSizeStrategy={{ type: "fitGridWidth" }}
               columnDefs={allocationColumnDefs}
               defaultColDef={{
                 filter: true,
@@ -577,7 +580,7 @@ export default function CjAllocationClient({
               }}
               rowData={allocationRows}
             />
-          </div>
+          </GridFrame>
         </Panel>
       </div>
     </main>

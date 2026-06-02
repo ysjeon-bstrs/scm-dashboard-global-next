@@ -179,31 +179,66 @@
   }
 }
 
-/* AG Grid — align the Quartz theme with the palette. */
+/*
+ * AG Grid — render the Quartz grid as a flush data ledger inside the panel.
+ * No wrapper frame, no header bar, no zebra stripes: just horizontal row
+ * rules, a strong header underline, generous rhythm, and the brand accent.
+ */
 .ag-theme-quartz {
   --ag-font-family: var(--font-sans);
   --ag-font-size: 13px;
   --ag-foreground-color: var(--color-ink);
-  --ag-background-color: var(--color-surface);
-  --ag-header-background-color: var(--color-sunken);
+  --ag-background-color: transparent;
+  --ag-header-background-color: transparent;
   --ag-header-foreground-color: var(--color-muted);
-  --ag-border-color: var(--color-line);
+  --ag-border-color: transparent;
   --ag-row-border-color: var(--color-line);
-  --ag-odd-row-background-color: var(--color-brand-softer);
+  --ag-odd-row-background-color: transparent;
   --ag-row-hover-color: var(--color-brand-soft);
   --ag-selected-row-background-color: var(--color-brand-soft);
   --ag-accent-color: var(--color-brand);
   --ag-input-focus-border-color: var(--color-brand);
-  --ag-wrapper-border-radius: 12px;
-  --ag-border-radius: 8px;
+  --ag-input-border-color: var(--color-line);
   --ag-header-column-resize-handle-color: var(--color-line-strong);
+  --ag-header-height: 42px;
+  --ag-row-height: 46px;
+  --ag-cell-horizontal-padding: 18px;
+  --ag-wrapper-border-radius: 0px;
 }
 
+.ag-theme-quartz .ag-root-wrapper {
+  border: none;
+  background: transparent;
+}
+.ag-theme-quartz .ag-header {
+  border-bottom: 1px solid var(--color-line-strong);
+}
 .ag-theme-quartz .ag-header-cell-text {
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   font-size: 11px;
   font-weight: 600;
+}
+/* Quiet the floating-filter row so it reads as one with the header. */
+.ag-theme-quartz .ag-floating-filter .ag-input-field-input {
+  border-radius: 7px;
+  font-size: 12px;
+}
+/* Slim, tinted scrollbars. */
+.ag-theme-quartz ::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+.ag-theme-quartz ::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+}
+.ag-theme-quartz ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+  background-clip: content-box;
+  border: 3px solid transparent;
 }
 
 /* Allocation status accents inside grids */

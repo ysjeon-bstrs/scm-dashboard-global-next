@@ -97,6 +97,26 @@ export function Panel({
   return <section className={`panel p-4 sm:p-5 ${className}`}>{children}</section>;
 }
 
+/**
+ * Bleeds an AG Grid to the panel edges so the table reads as the panel's
+ * content rather than a nested box. Pair with a PanelHeader above it.
+ */
+export function GridFrame({
+  height,
+  children,
+}: {
+  height: number;
+  children: ReactNode;
+}) {
+  return (
+    <div className="-mx-4 -mb-4 overflow-hidden rounded-b-[var(--radius-panel)] border-t border-line sm:-mx-5 sm:-mb-5">
+      <div className="ag-theme-quartz w-full" style={{ height }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 interface PanelHeaderProps {
   title: ReactNode;
   meta?: ReactNode;
