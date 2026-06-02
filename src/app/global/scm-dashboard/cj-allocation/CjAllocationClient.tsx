@@ -166,6 +166,9 @@ interface CjAllocationClientProps {
   initialAuthError: "unauthenticated" | "forbidden-domain" | null;
 }
 
+// CJ storage is billed per pallet (a partial pallet still counts as one).
+const PALLET_MONTHLY_USD = 25;
+
 const OUTBOUND_TYPES = ["FBA", "TikTokShop", "B2B"] as const;
 const DEPOT_OPTIONS = [
   "CJLA 1 Amazon",
@@ -509,7 +512,17 @@ export default function CjAllocationClient({
               </p>
               <p className="mt-2 text-xs text-faint">전 센터 합계 (EA)</p>
             </div>
-            <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
+              <Stat
+                hint={`≈ $${(summary.kpis.billedPallets * PALLET_MONTHLY_USD).toLocaleString()}/월 · 팔렛당 $${PALLET_MONTHLY_USD}${
+                  summary.kpis.palletUnknownGroups > 0
+                    ? ` · 미산정 ${summary.kpis.palletUnknownGroups}건`
+                    : ""
+                }`}
+                label="예상 보관 팔렛"
+                tone="brand"
+                value={summary.kpis.billedPallets.toLocaleString()}
+              />
               <Stat label="품목수" value={summary.kpis.skuCount.toLocaleString()} />
               <Stat label="로트수" value={summary.kpis.lotCount.toLocaleString()} />
               <Stat label="센터수" value={summary.kpis.depotCount.toLocaleString()} />

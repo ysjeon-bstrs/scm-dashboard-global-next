@@ -5,6 +5,14 @@ export interface CjStockKpis {
   skuCount: number;
   lotCount: number;
   depotCount: number;
+  /**
+   * Billed pallets (conservative): ceil per SKU+expiry group — a partial pallet
+   * bills as a whole one, and expiries are not merged. Runs slightly higher than
+   * CJ's actual per-SKU billing, on purpose, so storage cost is never understated.
+   */
+  billedPallets: number;
+  /** Groups holding stock but with no pallet master (excluded from billedPallets). */
+  palletUnknownGroups: number;
 }
 
 export interface CjStockSummary {
@@ -73,9 +81,21 @@ export function summarizeCjStock(stockRows: CjLotStockRow[]): CjStockSummary {
   }
 
   const rows: CjStockSummaryRow[] = [];
+  let billedPallets = 0;
+  let palletUnknownGroups = 0;
   for (const group of groups.values()) {
     const upb = group.units_per_box;
     const available = group.available_qty;
+    const upp = group.unitsPerPallet;
+
+    // Conservative pallet billing: each SKU+expiry group rounds up on its own.
+    if (available > 0) {
+      if (upp && upp > 0) {
+        billedPallets += Math.ceil(available / upp);
+      } else {
+        palletUnknownGroups += 1;
+      }
+    }
 
     if (upb == null) {
       group.box_status = "unregistered";
@@ -93,10 +113,7 @@ export function summarizeCjStock(stockRows: CjLotStockRow[]): CjStockSummary {
       group.box_status = "boxed";
       group.full_boxes = Math.floor(available / upb);
       group.loose_units = available % upb;
-      group.est_pallets =
-        group.unitsPerPallet && group.unitsPerPallet > 0
-          ? available / group.unitsPerPallet
-          : null;
+      group.est_pallets = upp && upp > 0 ? available / upp : null;
     }
 
     const { lotKeys: _lotKeys, unitsPerPallet: _unitsPerPallet, ...summaryRow } =
@@ -120,6 +137,8 @@ export function summarizeCjStock(stockRows: CjLotStockRow[]): CjStockSummary {
       skuCount: skuSet.size,
       lotCount: stockRows.length,
       depotCount: depotSet.size,
+      billedPallets,
+      palletUnknownGroups,
     },
     unregisteredSkus: Array.from(unregistered).sort(),
   };
