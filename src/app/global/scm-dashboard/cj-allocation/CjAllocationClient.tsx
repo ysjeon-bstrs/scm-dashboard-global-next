@@ -759,7 +759,13 @@ export default function CjAllocationClient({
                     ? "border-brand bg-brand-soft/50"
                     : "border-line bg-sunken/60 hover:border-line-strong"
                 }`}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={(event) => {
+                  // Ignore the click bubbling up from the hidden input itself,
+                  // otherwise input.click() re-triggers this handler infinitely.
+                  if (event.target !== fileInputRef.current) {
+                    fileInputRef.current?.click();
+                  }
+                }}
                 onDragLeave={() => setDragOver(false)}
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -824,7 +830,7 @@ export default function CjAllocationClient({
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center gap-1 py-5 text-center">
+                  <div className="pointer-events-none flex flex-col items-center gap-1 py-5 text-center">
                     <span className="text-sm font-medium text-ink">
                       출고 요청 엑셀을 드래그하거나 클릭해서 선택
                     </span>
