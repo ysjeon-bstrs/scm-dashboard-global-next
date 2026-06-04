@@ -13,6 +13,16 @@ import {
 } from "@/lib/scm-dashboard/constants";
 import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
 import { summarizeCjStock } from "@/lib/scm-dashboard/cjSummary";
+import {
+  getRemark,
+  normalizeExpiry,
+  parseFbaRows,
+  summarizeValidation,
+  validateShipmentRows,
+  type CjStockLookup,
+  type FbaShipmentRow,
+  type ValidationStatus,
+} from "@/lib/scm-dashboard/cjValidation";
 import type {
   CjAllocationRequestRow,
   CjAllocationResponse,
@@ -65,78 +75,20 @@ function registerAgGrid() {
   }
 }
 
-// Fuzzy header matching — CJ/order files vary in column naming, so resolve by
-// pattern (priority order) instead of exact key match.
-const SKU_PATTERNS = [
-  /^resource_code$/i,
-  /품목\s*코드/,
-  /상품\s*코드/,
-  /^sku$/i,
-  /product[_\s]?code/i,
-  /^prod[_\s]?cd$/i,
-  /품번/,
-  /자재\s*코드/,
-];
-const QTY_PATTERNS = [
-  /요청\s*수량/,
-  /출고\s*수량/,
-  /주문\s*수량/,
-  /requested?[_\s]?qty/i,
-  /quantity/i,
-  /^qty$/i,
-  /수량/,
-  /^ea$/i,
-];
-const NAME_PATTERNS = [/품목$/, /상품\s*명/, /품목\s*명/, /product\s*name/i, /^name$/i, /prodnm/i];
-const REF_PATTERNS = [/참조/, /reference/i, /주문\s*번호/, /오더/, /shipment/i, /^order/i, /fba/i];
-
-function resolveColumn(columns: string[], patterns: RegExp[]) {
-  for (const pattern of patterns) {
-    const hit = columns.find((column) => pattern.test(column.trim()));
-    if (hit) return hit;
-  }
-  return null;
-}
-
-interface ParsedWorkbook {
-  columns: string[];
-  raw: Record<string, unknown>[];
-  rows: CjAllocationRequestRow[];
-  mapping: { sku: string | null; qty: string | null };
-}
-
-async function parseRequestWorkbook(file: File): Promise<ParsedWorkbook> {
+async function readSheetRows(file: File): Promise<Record<string, unknown>[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer);
   const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
     defval: "",
   });
-
-  const columns = raw.length > 0 ? Object.keys(raw[0]) : [];
-  const skuCol = resolveColumn(columns, SKU_PATTERNS);
-  const qtyCol = resolveColumn(columns, QTY_PATTERNS);
-  const nameCol = resolveColumn(columns, NAME_PATTERNS);
-  const refCol = resolveColumn(columns, REF_PATTERNS);
-
-  const cell = (record: Record<string, unknown>, col: string | null) =>
-    col ? String(record[col] ?? "").trim() : "";
-
-  const rows = raw
-    .map((record, index) => ({
-      rowNumber: index + 2,
-      resource_code: cell(record, skuCol),
-      resource_name: cell(record, nameCol),
-      requested_qty: Number(cell(record, qtyCol).replace(/,/g, "")) || 0,
-      // Outbound warehouse comes from the UI selection, not the file — the
-      // file's 배송센터 is the Amazon destination FC, not a CJ depot.
-      depot_code: "",
-      reference: cell(record, refCol),
-    }))
-    .filter((row) => row.resource_code && row.requested_qty > 0);
-
-  return { columns, raw, rows, mapping: { sku: skuCol, qty: qtyCol } };
 }
+
+const STATUS_ICON: Record<ValidationStatus, string> = {
+  ok: "✅",
+  warning: "⚠️",
+  error: "❌",
+};
 
 function downloadAllocationWorkbook(rows: CjLotAllocationRow[]) {
   const worksheet = XLSX.utils.json_to_sheet(
@@ -199,9 +151,8 @@ export default function CjAllocationClient({
   const [outboundType, setOutboundType] = useState<OutboundType>("FBA");
   const [depot, setDepot] = useState<string>("CJLA 1 Amazon");
   const [stockRows, setStockRows] = useState<CjLotStockRow[]>([]);
-  const [requestRows, setRequestRows] = useState<CjAllocationRequestRow[]>([]);
-  const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
-  const [previewColumns, setPreviewColumns] = useState<string[]>([]);
+  const [uploadRows, setUploadRows] = useState<Record<string, unknown>[]>([]);
+  const [validationStock, setValidationStock] = useState<CjLotStockRow[]>([]);
   const [allocationRows, setAllocationRows] = useState<CjLotAllocationRow[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -354,15 +305,79 @@ export default function CjAllocationClient({
     [],
   );
 
-  const previewColumnDefs = useMemo<ColDef<Record<string, unknown>>[]>(
+  // Stock + master lookup scoped to the selected outbound warehouse.
+  const stockLookup = useMemo<CjStockLookup>(() => {
+    const boxUnit = new Map<string, number>();
+    const expiries = new Map<string, Set<string>>();
+    const skusAtDepot = new Set<string>();
+    for (const row of validationStock) {
+      if (row.units_per_box != null && !boxUnit.has(row.resource_code)) {
+        boxUnit.set(row.resource_code, row.units_per_box);
+      }
+      if (row.depot_code === depot) {
+        skusAtDepot.add(row.resource_code);
+        const set = expiries.get(row.resource_code) ?? new Set<string>();
+        if (row.expiration_date) set.add(normalizeExpiry(row.expiration_date));
+        expiries.set(row.resource_code, set);
+      }
+    }
+    return {
+      boxUnitOf: (s) => boxUnit.get(s) ?? 0,
+      skuExists: (s) => skusAtDepot.has(s),
+      expiriesOf: (s) => Array.from(expiries.get(s) ?? []).sort(),
+    };
+  }, [validationStock, depot]);
+
+  const validation = useMemo(() => {
+    const rows = parseFbaRows(uploadRows, stockLookup);
+    validateShipmentRows(rows, stockLookup, validationStock.length > 0);
+    return summarizeValidation(rows);
+  }, [uploadRows, stockLookup, validationStock.length]);
+
+  const validRequestRows = useMemo<CjAllocationRequestRow[]>(
     () =>
-      previewColumns.map((column) => ({
-        field: column,
-        headerName: column,
-        minWidth: 110,
+      validation.rows
+        .filter((row) => row.validation_status !== "error")
+        .map((row) => ({
+          rowNumber: row.rowNumber,
+          resource_code: row.sku,
+          resource_name: row.product_name,
+          requested_qty: row.qty,
+          depot_code: "",
+          reference: row.reference_number,
+        })),
+    [validation],
+  );
+
+  const validationColumnDefs = useMemo<ColDef<FbaShipmentRow>[]>(
+    () => [
+      {
+        headerName: "상태",
+        minWidth: 70,
+        maxWidth: 80,
+        valueGetter: (params) =>
+          params.data ? STATUS_ICON[params.data.validation_status] : "",
+      },
+      { field: "reference_number", headerName: "Ref No.", minWidth: 150, cellClass: "cell-code" },
+      { field: "shipment_id", headerName: "Shipment ID", minWidth: 130, cellClass: "cell-code" },
+      { field: "fc", headerName: "센터", minWidth: 80 },
+      { field: "sku", headerName: "품번", minWidth: 100, cellClass: "cell-code" },
+      { field: "expiry_display", headerName: "유통기한", minWidth: 110 },
+      { field: "box_id_range", headerName: "박스ID", minWidth: 90 },
+      { field: "box_count", headerName: "박스수", minWidth: 80, type: "numericColumn", cellClass: "cell-num" },
+      { field: "qty", headerName: "수량(EA)", minWidth: 100, type: "numericColumn", cellClass: "cell-num" },
+      { field: "box_unit", headerName: "입수량", minWidth: 90, type: "numericColumn", cellClass: "cell-num" },
+      {
+        headerName: "비고",
+        minWidth: 160,
         flex: 1,
-      })),
-    [previewColumns],
+        valueGetter: (params) => (params.data ? getRemark(params.data) : ""),
+        cellClassRules: {
+          "cell-shortage": (params) => params.data?.validation_status === "error",
+        },
+      },
+    ],
+    [],
   );
 
   const loadStock = useCallback(async () => {
@@ -418,24 +433,26 @@ export default function CjAllocationClient({
   async function handleFile(file: File | null) {
     if (!file) return;
     setError(null);
-    const { columns, raw, rows, mapping } = await parseRequestWorkbook(file);
-    setPreviewRows(raw);
-    setPreviewColumns(columns);
-    setRequestRows(rows);
     setAllocationRows([]);
 
-    if (raw.length === 0) {
-      setMessage("파일에서 행을 읽지 못했습니다.");
-    } else if (rows.length === 0) {
-      setError(
-        `파일 ${raw.length.toLocaleString()}행을 읽었지만 SKU/수량 컬럼을 자동 인식하지 못했습니다. 감지된 컬럼: ${columns.join(", ")}`,
+    const raw = await readSheetRows(file);
+    setUploadRows(raw);
+
+    // Validation needs the full warehouse stock, independent of the search box.
+    try {
+      const response = await fetch(
+        `${SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH}?limit=500&latestOnly=true`,
+        { cache: "no-store" },
       );
-      setMessage(null);
-    } else {
-      setMessage(
-        `파일 ${raw.length.toLocaleString()}행 · 유효 요청 ${rows.length.toLocaleString()}행 (SKU="${mapping.sku}", 수량="${mapping.qty}").`,
-      );
+      if (response.ok) {
+        const payload = (await response.json()) as CjLotStockResponse;
+        setValidationStock(payload.rows);
+      }
+    } catch {
+      // Validation still runs on format (A~D, F, G); stock check (E) is skipped.
     }
+
+    setMessage(`파일 ${raw.length.toLocaleString()}행 파싱 완료.`);
   }
 
   async function allocate() {
@@ -445,7 +462,7 @@ export default function CjAllocationClient({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        rows: requestRows,
+        rows: validRequestRows,
         depot: depot.trim() || null,
         latestOnly: true,
       }),
@@ -691,7 +708,11 @@ export default function CjAllocationClient({
                 <div className="flex flex-wrap gap-2">
                   <button
                     className="btn btn-primary"
-                    disabled={requestRows.length === 0 || isAllocating}
+                    disabled={
+                      validRequestRows.length === 0 ||
+                      validation.errorCount > 0 ||
+                      isAllocating
+                    }
                     onClick={allocate}
                     type="button"
                   >
@@ -709,49 +730,109 @@ export default function CjAllocationClient({
               </div>
             </div>
 
-            {previewRows.length > 0 ? (
-              <div className="space-y-2.5">
+            {validation.rows.length > 0 ? (
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2.5">
                   <span className="step-no">✓</span>
-                  <h3 className="text-sm font-semibold text-ink">업로드 미리보기</h3>
+                  <h3 className="text-sm font-semibold text-ink">
+                    업로드 데이터 검증
+                  </h3>
                   <span className="text-xs text-faint">
-                    {previewRows.length.toLocaleString()}행 · 유효 요청{" "}
-                    {requestRows.length.toLocaleString()}행
+                    {validation.rows.length.toLocaleString()}행
                   </span>
                 </div>
-                <div
-                  className="ag-theme-quartz w-full overflow-hidden rounded-xl border border-line"
-                  style={{ height: 300 }}
-                >
-                  <AgGridReact<Record<string, unknown>>
-                    autoSizeStrategy={{ type: "fitGridWidth" }}
-                    columnDefs={previewColumnDefs}
-                    defaultColDef={{
-                      filter: true,
-                      resizable: true,
-                      sortable: true,
-                    }}
-                    rowData={previewRows}
+
+                <div className="grid grid-cols-3 gap-x-6 gap-y-4 rounded-xl border border-line bg-sunken/40 px-4 py-3">
+                  <Stat label="✅ 정상" value={validation.okCount.toLocaleString()} />
+                  <Stat
+                    label="⚠️ 경고"
+                    tone={validation.warningCount > 0 ? "warn" : "neutral"}
+                    value={validation.warningCount.toLocaleString()}
+                  />
+                  <Stat
+                    label="❌ 오류"
+                    tone={validation.errorCount > 0 ? "danger" : "neutral"}
+                    value={validation.errorCount.toLocaleString()}
                   />
                 </div>
+
+                <div
+                  className="ag-theme-quartz w-full overflow-hidden rounded-xl border border-line"
+                  style={{ height: 320 }}
+                >
+                  <AgGridReact<FbaShipmentRow>
+                    columnDefs={validationColumnDefs}
+                    defaultColDef={{ resizable: true, sortable: true }}
+                    rowData={validation.rows}
+                  />
+                </div>
+
+                {validation.errorCount > 0 ? (
+                  <div className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-ink">
+                    <p className="font-semibold">
+                      ❌ 오류가 있는 행이 {validation.errorCount}건 있습니다. 엑셀
+                      파일을 수정 후 다시 업로드해주세요.
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {validation.rows
+                        .filter((row) => row.validation_status === "error")
+                        .map((row) => (
+                          <li key={row.rowNumber}>
+                            <span className="font-medium">
+                              {row.shipment_id} / {row.sku} / {row.expiry_display}
+                            </span>
+                            <ul className="mt-0.5 list-disc space-y-0.5 pl-5">
+                              {row.validation_messages.map((msg, i) => (
+                                <li key={`${row.rowNumber}-${i}`}>{msg}</li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {validation.warningCount > 0 ? (
+                  <div className="rounded-xl bg-warn-soft px-4 py-3 text-sm text-warn-ink">
+                    <p className="font-semibold">
+                      ⚠️ 경고 {validation.warningCount}건
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {validation.rows
+                        .filter((row) => row.validation_status === "warning")
+                        .map((row) => (
+                          <li key={row.rowNumber}>
+                            <span className="font-medium">
+                              {row.shipment_id} / {row.sku} / {row.expiry_display}
+                            </span>
+                            <ul className="mt-0.5 list-disc space-y-0.5 pl-5">
+                              {row.validation_messages.map((msg, i) => (
+                                <li key={`${row.rowNumber}-${i}`}>{msg}</li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-line pt-5 sm:grid-cols-3">
-            <Stat label="Request rows" value={requestRows.length.toLocaleString()} />
+            <Stat label="유효 요청 행" value={validRequestRows.length.toLocaleString()} />
             <Stat
-              label="Allocation rows"
+              label="배정 행"
               value={allocationRows.length.toLocaleString()}
             />
             <Stat
-              label="Shortage EA"
+              label="부족 EA"
               tone={shortageEa > 0 ? "danger" : "ok"}
               value={shortageEa.toLocaleString()}
             />
           </div>
           <p className="mt-4 flex flex-wrap items-center gap-2 text-xs text-faint">
-            Current selection
+            현재 선택
             <StatusPill tone="brand">{outboundType}</StatusPill>
             <StatusPill tone="neutral">{depot}</StatusPill>
           </p>
