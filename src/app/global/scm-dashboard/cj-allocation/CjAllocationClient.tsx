@@ -82,7 +82,12 @@ function downloadCjWmsWorkbook(
   const worksheet = XLSX.utils.json_to_sheet(wmsRows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "CJOM주문양식");
-  XLSX.writeFile(workbook, "cj-wms-upload.xlsx");
+  const d = new Date();
+  const ts =
+    `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}` +
+    `${String(d.getDate()).padStart(2, "0")}${String(d.getHours()).padStart(2, "0")}` +
+    `${String(d.getMinutes()).padStart(2, "0")}`;
+  XLSX.writeFile(workbook, `cj_oms_upload_${ts}.xlsx`);
 }
 
 async function getApiErrorMessage(response: Response, fallback: string) {
@@ -870,8 +875,13 @@ export default function CjAllocationClient({
                   </button>
                   <button
                     className="btn btn-secondary"
-                    disabled={allocations.length === 0}
+                    disabled={allocations.length === 0 || shortageEa > 0}
                     onClick={() => downloadCjWmsWorkbook(allocations, validRows)}
+                    title={
+                      shortageEa > 0
+                        ? "부족분이 있어 다운로드할 수 없습니다 (전량 배정 필요)"
+                        : undefined
+                    }
                     type="button"
                   >
                     CJ WMS 다운로드
@@ -1013,6 +1023,12 @@ export default function CjAllocationClient({
             유통기한 로트끼리 혼입 박스로 묶습니다. CJ WMS 다운로드로 업로드 양식을
             받습니다.
           </p>
+          {shortageEa > 0 ? (
+            <div className="mb-3 rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-ink">
+              ❌ 부족 {shortageEa.toLocaleString()} EA — 전량 배정되지 않아 CJ WMS
+              다운로드가 막혀 있습니다. (박스 단위로 떨어지지 않는 잔여 등)
+            </div>
+          ) : null}
           <GridFrame height={360}>
             <AgGridReact<LotAllocation>
               autoSizeStrategy={{ type: "fitGridWidth" }}
