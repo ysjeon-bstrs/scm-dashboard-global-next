@@ -385,26 +385,40 @@ export default function CjAllocationClient({
     };
   }, [stockRows, depot]);
 
-  const validation = useMemo(() => {
-    const rows = parseFbaRows(uploadRows, stockLookup, outboundType);
-    validateShipmentRows(rows, stockLookup, stockRows.length > 0);
-    return summarizeValidation(rows);
-  }, [uploadRows, stockLookup, stockRows.length, outboundType]);
-
-  const validRows = useMemo(
-    () => validation.rows.filter((row) => row.validation_status !== "error"),
-    [validation],
-  );
-
   const warehouseStock = useMemo(
     () => stockRows.filter((row) => row.depot_code === depot),
     [stockRows, depot],
   );
 
-  // Cumulative demand per SKU+expiry vs warehouse availability.
-  const stockSufficiency = useMemo(
-    () => checkSufficiency(validRows, warehouseStock),
-    [validRows, warehouseStock],
+  const validation = useMemo(() => {
+    const rows = parseFbaRows(uploadRows, stockLookup, outboundType);
+    validateShipmentRows(rows, stockLookup, stockRows.length > 0);
+
+    // Cumulative sufficiency: if a SKU+expiry group's total demand exceeds the
+    // warehouse stock, mark every row in that group as an error so the 정상/오류
+    // counts stay consistent with the shortage banner.
+    const shortages =
+      stockRows.length > 0 ? checkSufficiency(rows, warehouseStock) : [];
+    if (shortages.length > 0) {
+      const shortKeys = new Set(
+        shortages.map((s) => `${s.sku}|${normalizeExpiry(s.expiry)}`),
+      );
+      for (const row of rows) {
+        if (shortKeys.has(`${row.sku}|${row.expiry_norm}`)) {
+          row.validation_messages.push(
+            "[E] 재고부족 — 유통기한 합계가 가용재고를 초과",
+          );
+          row.validation_status = "error";
+        }
+      }
+    }
+
+    return { ...summarizeValidation(rows), shortages };
+  }, [uploadRows, stockLookup, stockRows.length, warehouseStock, outboundType]);
+
+  const validRows = useMemo(
+    () => validation.rows.filter((row) => row.validation_status !== "error"),
+    [validation],
   );
 
   // Lots eligible for the order (requested SKU+expiry at the warehouse).
@@ -930,7 +944,6 @@ export default function CjAllocationClient({
                     disabled={
                       validRows.length === 0 ||
                       validation.errorCount > 0 ||
-                      stockSufficiency.length > 0 ||
                       isAllocating
                     }
                     onClick={allocate}
@@ -1041,13 +1054,13 @@ export default function CjAllocationClient({
                   </div>
                 ) : null}
 
-                {stockSufficiency.length > 0 ? (
+                {validation.shortages.length > 0 ? (
                   <div className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-ink">
                     <p className="font-semibold">
                       ❌ 재고 부족 — {depot} 기준, 요청 수량이 가용재고를 초과합니다.
                     </p>
                     <ul className="mt-2 space-y-1">
-                      {stockSufficiency.map((s) => (
+                      {validation.shortages.map((s) => (
                         <li key={`${s.sku}-${s.expiry}`}>
                           {s.sku} / {s.expiry} — 요청 {s.demand.toLocaleString()} / 가용{" "}
                           {s.available.toLocaleString()} (부족{" "}
@@ -1060,9 +1073,7 @@ export default function CjAllocationClient({
               </div>
             ) : null}
 
-            {validRows.length > 0 &&
-            validation.errorCount === 0 &&
-            stockSufficiency.length === 0 ? (
+            {validRows.length > 0 && validation.errorCount === 0 ? (
               <div className="space-y-2.5">
                 <div className="flex flex-wrap items-center gap-2.5">
                   <span className="step-no">4</span>
