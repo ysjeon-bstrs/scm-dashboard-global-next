@@ -306,6 +306,15 @@ export default function CjAllocationClient({
 
   const summary = useMemo(() => summarizeCjStock(filteredStock), [filteredStock]);
 
+  // Snapshot meta — latest-only load, so every row shares the same close date.
+  const snapshot = useMemo(() => {
+    const first = stockRows[0];
+    return {
+      closeDate: first?.close_date?.slice(0, 10) ?? "",
+      updatedAt: first?.updated_at?.replace("T", " ").slice(0, 16) ?? "",
+    };
+  }, [stockRows]);
+
   const summaryColumnDefs = useMemo<ColDef<CjStockSummaryRow>[]>(
     () => [
       {
@@ -470,7 +479,10 @@ export default function CjAllocationClient({
 
     const payload = (await response.json()) as CjLotStockResponse;
     setStockRows(payload.rows);
-    setMessage(`${payload.rows.length.toLocaleString()}개 로트 로드 완료 (전 센터).`);
+    const closeDate = payload.rows[0]?.close_date?.slice(0, 10);
+    setMessage(
+      `${closeDate ? `마감일 ${closeDate} · ` : ""}${payload.rows.length.toLocaleString()}개 로트 로드 완료 (전 센터).`,
+    );
     setIsLoadingStock(false);
   }, [user]);
 
@@ -595,6 +607,19 @@ export default function CjAllocationClient({
           eyebrow="CJ pilot"
           title="CJ Lot Allocation"
         />
+
+        {snapshot.closeDate ? (
+          <p className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-faint">
+            <span>
+              마감일 <span className="font-medium text-muted">{snapshot.closeDate}</span>
+            </span>
+            {snapshot.updatedAt ? (
+              <span>
+                DB 갱신 <span className="font-medium text-muted">{snapshot.updatedAt}</span>
+              </span>
+            ) : null}
+          </p>
+        ) : null}
 
         {message ? <Banner tone="brand">{message}</Banner> : null}
         {error ? <Banner tone="danger">{error}</Banner> : null}
