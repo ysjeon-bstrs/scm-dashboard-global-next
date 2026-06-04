@@ -1,4 +1,35 @@
 import type { CjLotStockRow, CjStockSummaryRow } from "./cjTypes";
+import { normalizeExpiry } from "./cjValidation";
+
+/**
+ * Merge duplicate (depot + SKU + lot + expiry) rows by summing quantities —
+ * port of _normalize_stock_rows_for_allocation. Prevents double-counted lot
+ * rows in the detail grid and KPI lot count.
+ */
+export function dedupeCjStockRows(rows: CjLotStockRow[]): CjLotStockRow[] {
+  const map = new Map<string, CjLotStockRow>();
+  for (const row of rows) {
+    const key = `${row.depot_code}|${row.resource_code}|${row.lot_no}|${normalizeExpiry(
+      row.expiration_date ?? "",
+    )}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.available_qty += Number(row.available_qty) || 0;
+      existing.stock_qty += Number(row.stock_qty) || 0;
+      existing.hold_qty += Number(row.hold_qty) || 0;
+      existing.allocated_qty += Number(row.allocated_qty) || 0;
+    } else {
+      map.set(key, {
+        ...row,
+        available_qty: Number(row.available_qty) || 0,
+        stock_qty: Number(row.stock_qty) || 0,
+        hold_qty: Number(row.hold_qty) || 0,
+        allocated_qty: Number(row.allocated_qty) || 0,
+      });
+    }
+  }
+  return [...map.values()];
+}
 
 export interface CjStockKpis {
   totalAvailable: number;

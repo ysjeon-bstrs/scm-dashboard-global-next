@@ -9,7 +9,7 @@ import * as XLSX from "xlsx";
 
 import { SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH } from "@/lib/scm-dashboard/constants";
 import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
-import { summarizeCjStock } from "@/lib/scm-dashboard/cjSummary";
+import { dedupeCjStockRows, summarizeCjStock } from "@/lib/scm-dashboard/cjSummary";
 import {
   getRemark,
   normalizeExpiry,
@@ -455,7 +455,7 @@ export default function CjAllocationClient({
     }
 
     const payload = (await response.json()) as CjLotStockResponse;
-    setStockRows(payload.rows);
+    setStockRows(dedupeCjStockRows(payload.rows));
     const closeDate = payload.rows[0]?.close_date?.slice(0, 10);
     setMessage(
       `${closeDate ? `마감일 ${closeDate} · ` : ""}${payload.rows.length.toLocaleString()}개 로트 로드 완료 (전 센터).`,
