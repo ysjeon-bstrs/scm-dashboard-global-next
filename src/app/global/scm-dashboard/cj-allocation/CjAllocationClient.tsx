@@ -23,6 +23,7 @@ import {
 import {
   allocateOrder,
   buildCjWmsRows,
+  checkSufficiency,
   type AllocationResult,
   type LotAllocation,
 } from "@/lib/scm-dashboard/cjAllocate";
@@ -388,6 +389,17 @@ export default function CjAllocationClient({
     [validation],
   );
 
+  const warehouseStock = useMemo(
+    () => stockRows.filter((row) => row.depot_code === depot),
+    [stockRows, depot],
+  );
+
+  // Cumulative demand per SKU+expiry vs warehouse availability.
+  const stockSufficiency = useMemo(
+    () => checkSufficiency(validRows, warehouseStock),
+    [validRows, warehouseStock],
+  );
+
   const validationColumnDefs = useMemo<ColDef<FbaShipmentRow>[]>(
     () => [
       {
@@ -494,7 +506,6 @@ export default function CjAllocationClient({
   function allocate() {
     setIsAllocating(true);
     setError(null);
-    const warehouseStock = stockRows.filter((row) => row.depot_code === depot);
     const result = allocateOrder(validRows, warehouseStock);
     setAllocResult(result);
     setMessage(
@@ -849,6 +860,7 @@ export default function CjAllocationClient({
                     disabled={
                       validRows.length === 0 ||
                       validation.errorCount > 0 ||
+                      stockSufficiency.length > 0 ||
                       isAllocating
                     }
                     onClick={allocate}
@@ -950,6 +962,23 @@ export default function CjAllocationClient({
                             </ul>
                           </li>
                         ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {stockSufficiency.length > 0 ? (
+                  <div className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-ink">
+                    <p className="font-semibold">
+                      ❌ 재고 부족 — {depot} 기준, 요청 수량이 가용재고를 초과합니다.
+                    </p>
+                    <ul className="mt-2 space-y-1">
+                      {stockSufficiency.map((s) => (
+                        <li key={`${s.sku}-${s.expiry}`}>
+                          {s.sku} / {s.expiry} — 요청 {s.demand.toLocaleString()} / 가용{" "}
+                          {s.available.toLocaleString()} (부족{" "}
+                          {s.shortage.toLocaleString()} EA)
+                        </li>
+                      ))}
                     </ul>
                   </div>
                 ) : null}

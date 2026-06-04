@@ -252,9 +252,52 @@ export function allocateRow(
   return allocations;
 }
 
+export interface ExpiryShortage {
+  sku: string;
+  expiry: string; // display form
+  demand: number;
+  available: number;
+  shortage: number;
+}
+
+/**
+ * Pre-allocation sufficiency check: aggregate demand per SKU+expiry across all
+ * rows and compare to warehouse availability (port of _check_stock_sufficiency).
+ */
+export function checkSufficiency(
+  rows: FbaShipmentRow[],
+  warehouseStock: CjLotStockRow[],
+): ExpiryShortage[] {
+  const demand = new Map<string, { sku: string; expiry: string; qty: number }>();
+  for (const row of rows) {
+    const key = `${row.sku}|${row.expiry_norm}`;
+    const entry = demand.get(key) ?? {
+      sku: row.sku,
+      expiry: row.expiry_display,
+      qty: 0,
+    };
+    entry.qty += row.qty;
+    demand.set(key, entry);
+  }
+
+  const available = new Map<string, number>();
+  for (const stock of warehouseStock) {
+    const key = `${stock.resource_code}|${normalizeExpiry(stock.expiration_date ?? "")}`;
+    available.set(key, (available.get(key) ?? 0) + (Number(stock.available_qty) || 0));
+  }
+
+  const shortages: ExpiryShortage[] = [];
+  for (const [key, { sku, expiry, qty }] of demand) {
+    const avail = available.get(key) ?? 0;
+    if (qty > avail) {
+      shortages.push({ sku, expiry, demand: qty, available: avail, shortage: qty - avail });
+    }
+  }
+  return shortages;
+}
+
 export interface AllocationResult {
   allocations: LotAllocation[];
-  /** Per shipment row: requested vs allocated, with shortage. */
   shortageEa: number;
   allocatedEa: number;
   requestedEa: number;
@@ -264,16 +307,36 @@ export function allocateOrder(
   rows: FbaShipmentRow[],
   warehouseStock: CjLotStockRow[],
 ): AllocationResult {
+  // Working availability per SKU+expiry+lot, decremented across rows so the
+  // same lot isn't double-allocated (port of _allocate_sku_with_lots).
+  const avail = new Map<string, number>();
+  for (const stock of warehouseStock) {
+    const key = `${stock.resource_code}|${normalizeExpiry(stock.expiration_date ?? "")}|${stock.lot_no}`;
+    avail.set(key, (avail.get(key) ?? 0) + (Number(stock.available_qty) || 0));
+  }
+
   const allocations: LotAllocation[] = [];
   let requestedEa = 0;
   let allocatedEa = 0;
+
   for (const row of rows) {
     requestedEa += row.qty;
-    const lots = lotsForRequest(warehouseStock, row.sku, row.expiry_norm);
+    const prefix = `${row.sku}|${row.expiry_norm}|`;
+    const lots: StockLot[] = [...avail.entries()]
+      .filter(([key, qty]) => key.startsWith(prefix) && qty > 0)
+      .map(([key, qty]) => ({ lot: key.slice(prefix.length), available_qty: qty }))
+      .sort((a, b) => a.lot.localeCompare(b.lot));
+
     const rowAllocs = allocateRow(row, lots);
     allocations.push(...rowAllocs);
     allocatedEa += rowAllocs.reduce((s, a) => s + a.allocated_qty, 0);
+
+    for (const a of rowAllocs) {
+      const key = `${row.sku}|${row.expiry_norm}|${a.lot}`;
+      avail.set(key, (avail.get(key) ?? 0) - a.allocated_qty);
+    }
   }
+
   return {
     allocations,
     requestedEa,
