@@ -7,10 +7,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
-import {
-  SCM_DASHBOARD_CJ_ALLOCATION_API_PATH,
-  SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH,
-} from "@/lib/scm-dashboard/constants";
+import { SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH } from "@/lib/scm-dashboard/constants";
 import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
 import { summarizeCjStock } from "@/lib/scm-dashboard/cjSummary";
 import {
@@ -23,10 +20,13 @@ import {
   type FbaShipmentRow,
   type ValidationStatus,
 } from "@/lib/scm-dashboard/cjValidation";
+import {
+  allocateOrder,
+  buildCjWmsRows,
+  type AllocationResult,
+  type LotAllocation,
+} from "@/lib/scm-dashboard/cjAllocate";
 import type {
-  CjAllocationRequestRow,
-  CjAllocationResponse,
-  CjLotAllocationRow,
   CjLotStockResponse,
   CjLotStockRow,
   CjStockSummaryRow,
@@ -42,24 +42,7 @@ import {
   PanelHeader,
   Stat,
   StatusPill,
-  type Tone,
 } from "@/components/scm-dashboard/ui";
-
-const STATUS_TONE: Record<CjLotAllocationRow["status"], Tone> = {
-  allocated: "ok",
-  partial: "warn",
-  shortage: "danger",
-  unmatched: "neutral",
-};
-
-function StatusCellRenderer({
-  value,
-}: {
-  value?: CjLotAllocationRow["status"];
-}) {
-  if (!value) return null;
-  return <StatusPill tone={STATUS_TONE[value]}>{value}</StatusPill>;
-}
 
 let modulesRegistered = false;
 
@@ -90,26 +73,15 @@ const STATUS_ICON: Record<ValidationStatus, string> = {
   error: "❌",
 };
 
-function downloadAllocationWorkbook(rows: CjLotAllocationRow[]) {
-  const worksheet = XLSX.utils.json_to_sheet(
-    rows.map((row) => ({
-      rowNumber: row.rowNumber,
-      reference: row.reference ?? "",
-      resource_code: row.resource_code,
-      resource_name: row.resource_name ?? "",
-      depot_code: row.depot_code ?? "",
-      requested_qty: row.requested_qty,
-      lot_no: row.lot_no ?? "",
-      expiration_date: row.expiration_date ?? "",
-      available_qty: row.available_qty,
-      allocated_qty: row.allocated_qty,
-      shortage_qty: row.shortage_qty,
-      status: row.status,
-    })),
-  );
+function downloadCjWmsWorkbook(
+  allocations: LotAllocation[],
+  rows: FbaShipmentRow[],
+) {
+  const wmsRows = buildCjWmsRows(allocations, rows);
+  const worksheet = XLSX.utils.json_to_sheet(wmsRows);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "cj_allocation");
-  XLSX.writeFile(workbook, "cj-allocation-result.xlsx");
+  XLSX.utils.book_append_sheet(workbook, worksheet, "CJOM주문양식");
+  XLSX.writeFile(workbook, "cj-wms-upload.xlsx");
 }
 
 async function getApiErrorMessage(response: Response, fallback: string) {
@@ -155,7 +127,7 @@ export default function CjAllocationClient({
   const [uploadRows, setUploadRows] = useState<Record<string, unknown>[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [allocationRows, setAllocationRows] = useState<CjLotAllocationRow[]>([]);
+  const [allocResult, setAllocResult] = useState<AllocationResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingStock, setIsLoadingStock] = useState(false);
@@ -237,49 +209,46 @@ export default function CjAllocationClient({
     [],
   );
 
-  const allocationColumnDefs = useMemo<ColDef<CjLotAllocationRow>[]>(
+  const allocationColumnDefs = useMemo<ColDef<LotAllocation>[]>(
     () => [
-      { field: "rowNumber", headerName: "Row", minWidth: 90 },
-      { field: "reference", headerName: "Reference", minWidth: 140 },
+      { field: "shipment_id", headerName: "Shipment ID", minWidth: 130, cellClass: "cell-code" },
+      { field: "fc", headerName: "센터", minWidth: 80 },
+      { field: "sku", headerName: "품번", minWidth: 100, cellClass: "cell-code" },
+      { field: "expiry_display", headerName: "유통기한", minWidth: 110 },
+      { field: "lot", headerName: "로트번호", minWidth: 110, cellClass: "cell-code" },
       {
-        field: "resource_code",
-        headerName: "SKU",
-        minWidth: 120,
-        cellClass: "cell-code",
-      },
-      { field: "depot_code", headerName: "Depot", minWidth: 130 },
-      { field: "lot_no", headerName: "Lot", minWidth: 120, cellClass: "cell-code" },
-      { field: "expiration_date", headerName: "Expiry", minWidth: 120 },
-      {
-        field: "requested_qty",
-        headerName: "Request",
+        headerName: "박스범위",
         minWidth: 110,
+        valueGetter: (params) =>
+          params.data
+            ? params.data.box_start === params.data.box_end
+              ? `${params.data.box_start}`
+              : `${params.data.box_start}–${params.data.box_end}`
+            : "",
+      },
+      {
+        field: "allocated_boxes",
+        headerName: "박스수",
+        minWidth: 80,
         type: "numericColumn",
         cellClass: "cell-num",
       },
       {
         field: "allocated_qty",
-        headerName: "Allocated",
+        headerName: "배정수량(EA)",
         minWidth: 120,
         type: "numericColumn",
         cellClass: "cell-num cell-allocated",
       },
       {
-        field: "shortage_qty",
-        headerName: "Shortage",
-        minWidth: 120,
-        type: "numericColumn",
-        cellClass: "cell-num",
-        cellClassRules: {
-          "cell-shortage": (params) => Number(params.value) > 0,
-        },
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        minWidth: 130,
+        headerName: "혼입",
+        minWidth: 80,
         cellClass: "pill-cell",
-        cellRenderer: StatusCellRenderer,
+        valueGetter: (params) => (params.data?.is_mixed ? "혼입" : ""),
+        cellRenderer: (params: { value?: string }) =>
+          params.value ? (
+            <StatusPill tone="warn">{params.value}</StatusPill>
+          ) : null,
       },
     ],
     [],
@@ -414,18 +383,8 @@ export default function CjAllocationClient({
     return summarizeValidation(rows);
   }, [uploadRows, stockLookup, stockRows.length]);
 
-  const validRequestRows = useMemo<CjAllocationRequestRow[]>(
-    () =>
-      validation.rows
-        .filter((row) => row.validation_status !== "error")
-        .map((row) => ({
-          rowNumber: row.rowNumber,
-          resource_code: row.sku,
-          resource_name: row.product_name,
-          requested_qty: row.qty,
-          depot_code: "",
-          reference: row.reference_number,
-        })),
+  const validRows = useMemo(
+    () => validation.rows.filter((row) => row.validation_status !== "error"),
     [validation],
   );
 
@@ -515,7 +474,7 @@ export default function CjAllocationClient({
   async function handleFile(file: File | null) {
     if (!file) return;
     setError(null);
-    setAllocationRows([]);
+    setAllocResult(null);
     setFileName(file.name);
 
     const raw = await readSheetRows(file);
@@ -526,32 +485,24 @@ export default function CjAllocationClient({
   function clearUpload() {
     setUploadRows([]);
     setFileName(null);
-    setAllocationRows([]);
+    setAllocResult(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function allocate() {
+  // Allocate locally: each valid row draws from its requested SKU+expiry lots
+  // at the selected warehouse (full boxes by lot, then mixed boxes).
+  function allocate() {
     setIsAllocating(true);
     setError(null);
-    const response = await fetch(SCM_DASHBOARD_CJ_ALLOCATION_API_PATH, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        rows: validRequestRows,
-        depot: depot.trim() || null,
-        latestOnly: true,
-      }),
-    });
-
-    if (!response.ok) {
-      setError(await getApiErrorMessage(response, "CJ allocation API failed"));
-      setIsAllocating(false);
-      return;
-    }
-
-    const payload = (await response.json()) as CjAllocationResponse;
-    setAllocationRows(payload.rows);
-    setMessage(payload.notices.join(" "));
+    const warehouseStock = stockRows.filter((row) => row.depot_code === depot);
+    const result = allocateOrder(validRows, warehouseStock);
+    setAllocResult(result);
+    setMessage(
+      `배정 완료 — ${result.allocations.length.toLocaleString()}개 로트 배정` +
+        (result.shortageEa > 0
+          ? `, 부족 ${result.shortageEa.toLocaleString()} EA`
+          : ""),
+    );
     setIsAllocating(false);
   }
 
@@ -582,10 +533,8 @@ export default function CjAllocationClient({
     );
   }
 
-  const shortageEa = allocationRows.reduce(
-    (sum, row) => sum + row.shortage_qty,
-    0,
-  );
+  const allocations = allocResult?.allocations ?? [];
+  const shortageEa = allocResult?.shortageEa ?? 0;
 
   return (
     <main className="min-h-dvh px-4 py-6 sm:px-6 lg:px-8">
@@ -892,7 +841,7 @@ export default function CjAllocationClient({
                   <button
                     className="btn btn-primary"
                     disabled={
-                      validRequestRows.length === 0 ||
+                      validRows.length === 0 ||
                       validation.errorCount > 0 ||
                       isAllocating
                     }
@@ -903,11 +852,11 @@ export default function CjAllocationClient({
                   </button>
                   <button
                     className="btn btn-secondary"
-                    disabled={allocationRows.length === 0}
-                    onClick={() => downloadAllocationWorkbook(allocationRows)}
+                    disabled={allocations.length === 0}
+                    onClick={() => downloadCjWmsWorkbook(allocations, validRows)}
                     type="button"
                   >
-                    배정 결과 다운로드
+                    CJ WMS 다운로드
                   </button>
                 </div>
               </div>
@@ -1003,11 +952,8 @@ export default function CjAllocationClient({
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-line pt-5 sm:grid-cols-3">
-            <Stat label="유효 요청 행" value={validRequestRows.length.toLocaleString()} />
-            <Stat
-              label="배정 행"
-              value={allocationRows.length.toLocaleString()}
-            />
+            <Stat label="유효 요청 행" value={validRows.length.toLocaleString()} />
+            <Stat label="배정 로트" value={allocations.length.toLocaleString()} />
             <Stat
               label="부족 EA"
               tone={shortageEa > 0 ? "danger" : "ok"}
@@ -1024,11 +970,16 @@ export default function CjAllocationClient({
         <Panel>
           <PanelHeader
             eyebrow="Result"
-            meta={`${allocationRows.length.toLocaleString()} rows`}
-            title="Allocation result"
+            meta={`${allocations.length.toLocaleString()} lots`}
+            title="로트 배정 결과"
           />
+          <p className="-mt-2 mb-3 text-sm text-muted">
+            요청 유통기한 로트에서 박스 단위로 배정하고, 박스에 못 채운 잔여는 같은
+            유통기한 로트끼리 혼입 박스로 묶습니다. CJ WMS 다운로드로 업로드 양식을
+            받습니다.
+          </p>
           <GridFrame height={360}>
-            <AgGridReact<CjLotAllocationRow>
+            <AgGridReact<LotAllocation>
               autoSizeStrategy={{ type: "fitGridWidth" }}
               columnDefs={allocationColumnDefs}
               defaultColDef={{
@@ -1037,7 +988,7 @@ export default function CjAllocationClient({
                 resizable: true,
                 sortable: true,
               }}
-              rowData={allocationRows}
+              rowData={allocations}
             />
           </GridFrame>
         </Panel>
