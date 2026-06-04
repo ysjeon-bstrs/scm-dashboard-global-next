@@ -4,7 +4,7 @@ import { AllEnterpriseModule, LicenseManager } from "ag-grid-enterprise";
 import { ModuleRegistry, type ColDef } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 import {
@@ -147,17 +147,19 @@ export default function CjAllocationClient({
   user,
   initialAuthError,
 }: CjAllocationClientProps) {
-  const [sku, setSku] = useState("");
+  const [skuQuery, setSkuQuery] = useState("");
+  const [centerFilter, setCenterFilter] = useState("전체");
   const [outboundType, setOutboundType] = useState<OutboundType>("FBA");
   const [depot, setDepot] = useState<string>("CJLA 1 Amazon");
   const [stockRows, setStockRows] = useState<CjLotStockRow[]>([]);
   const [uploadRows, setUploadRows] = useState<Record<string, unknown>[]>([]);
-  const [validationStock, setValidationStock] = useState<CjLotStockRow[]>([]);
+  const [fileName, setFileName] = useState<string | null>(null);
   const [allocationRows, setAllocationRows] = useState<CjLotAllocationRow[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingStock, setIsLoadingStock] = useState(false);
   const [isAllocating, setIsAllocating] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useMemo(() => registerAgGrid(), []);
 
@@ -234,7 +236,27 @@ export default function CjAllocationClient({
     [],
   );
 
-  const summary = useMemo(() => summarizeCjStock(stockRows), [stockRows]);
+  // Center options derived from the loaded snapshot ("전체" + each depot).
+  const centerOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of stockRows) if (row.depot_code) set.add(row.depot_code);
+    return ["전체", ...Array.from(set).sort()];
+  }, [stockRows]);
+
+  // Single source of truth for the stock view: center + SKU/name filter.
+  const filteredStock = useMemo(() => {
+    const query = skuQuery.trim().toLowerCase();
+    return stockRows.filter((row) => {
+      if (centerFilter !== "전체" && row.depot_code !== centerFilter) return false;
+      if (!query) return true;
+      return (
+        row.resource_code.toLowerCase().includes(query) ||
+        (row.resource_name ?? "").toLowerCase().includes(query)
+      );
+    });
+  }, [stockRows, centerFilter, skuQuery]);
+
+  const summary = useMemo(() => summarizeCjStock(filteredStock), [filteredStock]);
 
   const summaryColumnDefs = useMemo<ColDef<CjStockSummaryRow>[]>(
     () => [
@@ -310,7 +332,7 @@ export default function CjAllocationClient({
     const boxUnit = new Map<string, number>();
     const expiries = new Map<string, Set<string>>();
     const skusAtDepot = new Set<string>();
-    for (const row of validationStock) {
+    for (const row of stockRows) {
       if (row.units_per_box != null && !boxUnit.has(row.resource_code)) {
         boxUnit.set(row.resource_code, row.units_per_box);
       }
@@ -326,13 +348,13 @@ export default function CjAllocationClient({
       skuExists: (s) => skusAtDepot.has(s),
       expiriesOf: (s) => Array.from(expiries.get(s) ?? []).sort(),
     };
-  }, [validationStock, depot]);
+  }, [stockRows, depot]);
 
   const validation = useMemo(() => {
     const rows = parseFbaRows(uploadRows, stockLookup);
-    validateShipmentRows(rows, stockLookup, validationStock.length > 0);
+    validateShipmentRows(rows, stockLookup, stockRows.length > 0);
     return summarizeValidation(rows);
-  }, [uploadRows, stockLookup, validationStock.length]);
+  }, [uploadRows, stockLookup, stockRows.length]);
 
   const validRequestRows = useMemo<CjAllocationRequestRow[]>(
     () =>
@@ -380,16 +402,15 @@ export default function CjAllocationClient({
     [],
   );
 
+  // Load the full latest snapshot once; center + SKU filtering is client-side.
   const loadStock = useCallback(async () => {
     if (!user) return;
 
     setIsLoadingStock(true);
     setError(null);
-    const params = new URLSearchParams({ limit: "500", latestOnly: "true" });
-    if (sku.trim()) params.set("sku", sku.trim());
 
     const response = await fetch(
-      `${SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH}?${params.toString()}`,
+      `${SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH}?limit=500&latestOnly=true`,
       { cache: "no-store" },
     );
 
@@ -403,7 +424,7 @@ export default function CjAllocationClient({
     setStockRows(payload.rows);
     setMessage(`${payload.rows.length.toLocaleString()}개 로트 로드 완료 (전 센터).`);
     setIsLoadingStock(false);
-  }, [sku, user]);
+  }, [user]);
 
   useEffect(() => {
     // CJ stock rows are synchronized with protected API state.
@@ -434,25 +455,18 @@ export default function CjAllocationClient({
     if (!file) return;
     setError(null);
     setAllocationRows([]);
+    setFileName(file.name);
 
     const raw = await readSheetRows(file);
     setUploadRows(raw);
-
-    // Validation needs the full warehouse stock, independent of the search box.
-    try {
-      const response = await fetch(
-        `${SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH}?limit=500&latestOnly=true`,
-        { cache: "no-store" },
-      );
-      if (response.ok) {
-        const payload = (await response.json()) as CjLotStockResponse;
-        setValidationStock(payload.rows);
-      }
-    } catch {
-      // Validation still runs on format (A~D, F, G); stock check (E) is skipped.
-    }
-
     setMessage(`파일 ${raw.length.toLocaleString()}행 파싱 완료.`);
+  }
+
+  function clearUpload() {
+    setUploadRows([]);
+    setFileName(null);
+    setAllocationRows([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function allocate() {
@@ -538,37 +552,22 @@ export default function CjAllocationClient({
         {error ? <Banner tone="danger">{error}</Banner> : null}
 
         <Panel>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="min-w-0 flex-1">
-              <span className="field-label">Stock SKU search</span>
-              <input
-                className="field mt-1.5 font-mono"
-                onChange={(event) => setSku(event.currentTarget.value)}
-                placeholder="BA00021"
-                value={sku}
-              />
-            </label>
-            <button
-              className="btn btn-primary sm:w-32"
-              disabled={isLoadingStock}
-              onClick={loadStock}
-              type="button"
-            >
-              {isLoadingStock ? "Loading…" : "Load"}
-            </button>
-          </div>
-        </Panel>
-
-        <Panel>
           <div className="grid gap-6 lg:grid-cols-[1.3fr_3fr] lg:gap-9">
             <div className="lg:border-r lg:border-line lg:pr-9">
               <p className="eyebrow">CJ 가용재고</p>
               <p className="mt-3 text-[2.75rem] leading-none font-semibold tracking-tight tabular-nums text-ink">
                 {summary.kpis.totalAvailable.toLocaleString()}
               </p>
-              <p className="mt-2 text-xs text-faint">전 센터 합계 (EA)</p>
+              <p className="mt-2 text-xs text-faint">
+                {centerFilter === "전체"
+                  ? "전 센터 합계 (EA)"
+                  : `${centerFilter} 합계 (EA)`}
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
+              <Stat label="센터수" value={summary.kpis.depotCount.toLocaleString()} />
+              <Stat label="품목수" value={summary.kpis.skuCount.toLocaleString()} />
+              <Stat label="로트수" value={summary.kpis.lotCount.toLocaleString()} />
               <Stat
                 hint={`≈ $${(summary.kpis.billedPallets * PALLET_MONTHLY_USD).toLocaleString()}/월 · 팔렛당 $${PALLET_MONTHLY_USD}${
                   summary.kpis.palletUnknownGroups > 0
@@ -579,10 +578,43 @@ export default function CjAllocationClient({
                 tone="brand"
                 value={summary.kpis.billedPallets.toLocaleString()}
               />
-              <Stat label="품목수" value={summary.kpis.skuCount.toLocaleString()} />
-              <Stat label="로트수" value={summary.kpis.lotCount.toLocaleString()} />
-              <Stat label="센터수" value={summary.kpis.depotCount.toLocaleString()} />
             </div>
+          </div>
+        </Panel>
+
+        <Panel>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] sm:items-end">
+            <label className="min-w-0">
+              <span className="field-label">가상센터</span>
+              <select
+                className="field mt-1.5"
+                onChange={(event) => setCenterFilter(event.currentTarget.value)}
+                value={centerFilter}
+              >
+                {centerOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="min-w-0">
+              <span className="field-label">품번 / 상품명 검색</span>
+              <input
+                className="field mt-1.5"
+                onChange={(event) => setSkuQuery(event.currentTarget.value)}
+                placeholder="BA00022 또는 비타민"
+                value={skuQuery}
+              />
+            </label>
+            <button
+              className="btn btn-secondary sm:w-28"
+              disabled={isLoadingStock}
+              onClick={loadStock}
+              type="button"
+            >
+              {isLoadingStock ? "불러오는 중…" : "새로고침"}
+            </button>
           </div>
         </Panel>
 
@@ -601,8 +633,8 @@ export default function CjAllocationClient({
             title="SKU · 유통기한 요약"
           />
           <p className="-mt-2 mb-3 text-sm text-muted">
-            SKU+유통기한으로 묶어 가용재고를 박스·팔렛으로 환산합니다. 각 행은 전
-            센터 합산이라 팔렛 수는 추정치입니다.
+            SKU+유통기한으로 묶어 가용재고를 박스·팔렛으로 환산합니다. 상단의
+            센터·검색 필터가 함께 적용되며, 전 센터 합산 시 팔렛 수는 추정치입니다.
           </p>
           <GridFrame height={440}>
             <AgGridReact<CjStockSummaryRow>
@@ -620,8 +652,8 @@ export default function CjAllocationClient({
         </Panel>
 
         <Collapsible
-          meta={`${stockRows.length.toLocaleString()} lots`}
-          title="로트별 재고 현황 (전체)"
+          meta={`${filteredStock.length.toLocaleString()} lots`}
+          title="로트별 재고 현황"
         >
           <div className="ag-theme-quartz w-full" style={{ height: 420 }}>
             <AgGridReact<CjLotStockRow>
@@ -633,7 +665,7 @@ export default function CjAllocationClient({
                 resizable: true,
                 sortable: true,
               }}
-              rowData={stockRows}
+              rowData={filteredStock}
               rowSelection={{ mode: "multiRow" }}
             />
           </div>
@@ -693,18 +725,69 @@ export default function CjAllocationClient({
               <div className="flex items-center gap-2.5">
                 <span className="step-no">3</span>
                 <h3 className="text-sm font-semibold text-ink">
-                  Upload request file
+                  출고 요청 파일 업로드
                 </h3>
               </div>
-              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-line bg-sunken/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+
+              <div className="rounded-xl border border-dashed border-line bg-sunken/60 p-3">
                 <input
                   accept=".xlsx,.xls"
-                  className="max-w-full text-sm text-muted file:mr-3 file:rounded-md file:border-0 file:bg-brand-soft file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-ink hover:file:bg-brand-softer"
+                  className="hidden"
                   onChange={(event) =>
                     void handleFile(event.currentTarget.files?.[0] ?? null)
                   }
+                  ref={fileInputRef}
                   type="file"
                 />
+                {fileName ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2 text-sm">
+                      <span aria-hidden>📄</span>
+                      <span className="truncate font-medium text-ink">
+                        {fileName}
+                      </span>
+                      <span className="shrink-0 text-xs text-faint">
+                        · {validation.rows.length.toLocaleString()}행
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => fileInputRef.current?.click()}
+                        type="button"
+                      >
+                        다른 파일
+                      </button>
+                      <button
+                        aria-label="업로드 파일 제거"
+                        className="btn btn-ghost text-danger"
+                        onClick={clearUpload}
+                        type="button"
+                      >
+                        ✕ 제거
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="flex w-full cursor-pointer flex-col items-center gap-1 py-4 text-center"
+                    onClick={() => fileInputRef.current?.click()}
+                    type="button"
+                  >
+                    <span className="text-sm font-medium text-ink">
+                      출고 요청 엑셀을 선택하세요
+                    </span>
+                    <span className="text-xs text-faint">
+                      XLSX · XLS — 클릭해서 파일 선택
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-faint">
+                  업로드하면 자동 검증됩니다. 오류 0건이어야 배정할 수 있어요.
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <button
                     className="btn btn-primary"
@@ -716,7 +799,7 @@ export default function CjAllocationClient({
                     onClick={allocate}
                     type="button"
                   >
-                    {isAllocating ? "Allocating…" : "Allocate"}
+                    {isAllocating ? "배정 중…" : "로트 배정 실행"}
                   </button>
                   <button
                     className="btn btn-secondary"
@@ -724,7 +807,7 @@ export default function CjAllocationClient({
                     onClick={() => downloadAllocationWorkbook(allocationRows)}
                     type="button"
                   >
-                    Export
+                    배정 결과 다운로드
                   </button>
                 </div>
               </div>
@@ -834,7 +917,7 @@ export default function CjAllocationClient({
           <p className="mt-4 flex flex-wrap items-center gap-2 text-xs text-faint">
             현재 선택
             <StatusPill tone="brand">{outboundType}</StatusPill>
-            <StatusPill tone="neutral">{depot}</StatusPill>
+            <StatusPill tone="brand">{depot}</StatusPill>
           </p>
         </Panel>
 
