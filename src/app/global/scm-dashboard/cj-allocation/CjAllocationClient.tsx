@@ -422,6 +422,34 @@ export default function CjAllocationClient({
       );
   }, [validRows, warehouseStock]);
 
+  // Group candidate lots by SKU + expiry, with the demand for that group.
+  const lotGroups = useMemo(() => {
+    const demand = new Map<string, number>();
+    for (const r of validRows) {
+      const key = `${r.sku}|${r.expiry_norm}`;
+      demand.set(key, (demand.get(key) ?? 0) + r.qty);
+    }
+    const groups = new Map<
+      string,
+      { sku: string; expiry: string; lots: CjLotStockRow[]; demand: number }
+    >();
+    for (const lot of candidateLots) {
+      const key = `${lot.resource_code}|${normalizeExpiry(lot.expiration_date ?? "")}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          sku: lot.resource_code,
+          expiry: lot.expiration_date ?? "",
+          lots: [],
+          demand: demand.get(key) ?? 0,
+        };
+        groups.set(key, group);
+      }
+      group.lots.push(lot);
+    }
+    return [...groups.values()];
+  }, [validRows, candidateLots]);
+
   function enableManualLots(on: boolean) {
     setManualLots(on);
     if (on) setSelectedLotSet(new Set(candidateLots.map((l) => l.lot_no)));
@@ -1048,53 +1076,65 @@ export default function CjAllocationClient({
                       }
                       type="checkbox"
                     />
-                    수동 선택 (끄면 자동 · 로트번호 순)
+                    수동 선택
                   </label>
                 </div>
                 {manualLots ? (
-                  <>
-                    <div className="overflow-x-auto rounded-xl border border-line">
-                      <table className="w-full text-sm">
-                        <thead className="bg-sunken/60 text-xs text-faint">
-                          <tr>
-                            <th className="px-3 py-2 text-left">
-                              <input
-                                checked={
-                                  candidateLots.length > 0 &&
-                                  candidateLots.every((l) =>
-                                    selectedLotSet.has(l.lot_no),
-                                  )
-                                }
-                                className="h-4 w-4 accent-brand"
-                                onChange={(event) =>
-                                  setSelectedLotSet(
-                                    event.currentTarget.checked
-                                      ? new Set(candidateLots.map((l) => l.lot_no))
-                                      : new Set(),
-                                  )
-                                }
-                                type="checkbox"
-                              />
-                            </th>
-                            <th className="px-3 py-2 text-left">품번</th>
-                            <th className="px-3 py-2 text-left">유통기한</th>
-                            <th className="px-3 py-2 text-left">로트번호</th>
-                            <th className="px-3 py-2 text-right">가용수량</th>
-                            <th className="px-3 py-2 text-right">입수량</th>
-                            <th className="px-3 py-2 text-right">가능박스</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {candidateLots.map((l) => {
-                            const upb = l.units_per_box ?? 0;
-                            const boxes =
-                              upb > 0 ? Math.floor((l.available_qty || 0) / upb) : 0;
-                            return (
-                              <tr
-                                className="border-t border-line"
-                                key={`${l.resource_code}-${l.expiration_date}-${l.lot_no}`}
-                              >
-                                <td className="px-3 py-1.5">
+                  <div className="space-y-3">
+                    <p className="text-xs text-faint">
+                      기본은 모든 로트를 자동(로트번호 순)으로 씁니다. 쓰고 싶지 않은
+                      로트만 체크를 해제하세요. 유통기한별 <b>선택 합</b>이 <b>요청</b>을
+                      채워야 부족이 안 납니다.
+                    </p>
+                    {lotGroups.map((group) => {
+                      const groupKey = `${group.sku}|${group.expiry}`;
+                      const selected = group.lots.filter((l) =>
+                        selectedLotSet.has(l.lot_no),
+                      );
+                      const selectedQty = selected.reduce(
+                        (s, l) => s + (l.available_qty || 0),
+                        0,
+                      );
+                      const availQty = group.lots.reduce(
+                        (s, l) => s + (l.available_qty || 0),
+                        0,
+                      );
+                      const covers = selectedQty >= group.demand;
+                      return (
+                        <div
+                          className="overflow-hidden rounded-xl border border-line"
+                          key={groupKey}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-sunken/60 px-3 py-2 text-xs">
+                            <span className="font-semibold text-ink">
+                              <span className="font-mono">{group.sku}</span> ·{" "}
+                              {group.expiry}
+                            </span>
+                            <span
+                              className={
+                                covers ? "text-muted" : "font-medium text-danger"
+                              }
+                            >
+                              요청 {group.demand.toLocaleString()} / 선택{" "}
+                              {selectedQty.toLocaleString()} / 가용{" "}
+                              {availQty.toLocaleString()}
+                              {!covers
+                                ? ` · 부족 ${(group.demand - selectedQty).toLocaleString()}`
+                                : ""}
+                            </span>
+                          </div>
+                          <div className="divide-y divide-line">
+                            {group.lots.map((l) => {
+                              const upb = l.units_per_box ?? 0;
+                              const boxes =
+                                upb > 0
+                                  ? Math.floor((l.available_qty || 0) / upb)
+                                  : 0;
+                              return (
+                                <label
+                                  className="flex cursor-pointer items-center gap-3 px-3 py-1.5 text-sm hover:bg-sunken/40"
+                                  key={l.lot_no}
+                                >
                                   <input
                                     checked={selectedLotSet.has(l.lot_no)}
                                     className="h-4 w-4 accent-brand"
@@ -1103,32 +1143,21 @@ export default function CjAllocationClient({
                                     }
                                     type="checkbox"
                                   />
-                                </td>
-                                <td className="px-3 py-1.5 font-mono">
-                                  {l.resource_code}
-                                </td>
-                                <td className="px-3 py-1.5">{l.expiration_date}</td>
-                                <td className="px-3 py-1.5 font-mono">{l.lot_no}</td>
-                                <td className="px-3 py-1.5 text-right tabular-nums">
-                                  {l.available_qty.toLocaleString()}
-                                </td>
-                                <td className="px-3 py-1.5 text-right tabular-nums">
-                                  {upb > 0 ? upb.toLocaleString() : "—"}
-                                </td>
-                                <td className="px-3 py-1.5 text-right tabular-nums">
-                                  {boxes.toLocaleString()}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="text-xs text-faint">
-                      선택 {selectedLotSet.size}개 / 후보 {candidateLots.length}개
-                      로트 — 체크한 로트에서만 배정합니다.
-                    </p>
-                  </>
+                                  <span className="w-28 font-mono">{l.lot_no}</span>
+                                  <span className="flex-1 text-right tabular-nums">
+                                    {l.available_qty.toLocaleString()} EA
+                                  </span>
+                                  <span className="w-24 text-right tabular-nums text-faint">
+                                    {boxes.toLocaleString()}박스
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <p className="text-xs text-faint">
                     자동 배정: 요청 유통기한의 모든 로트를 로트번호 순으로 사용합니다.
