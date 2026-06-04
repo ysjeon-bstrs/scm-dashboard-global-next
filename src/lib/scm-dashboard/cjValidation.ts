@@ -25,11 +25,16 @@ export interface FbaShipmentRow {
   box_start: number;
   box_end: number;
   box_count: number; // end - start + 1
-  box_unit: number; // 입수량 (master)
+  box_unit: number; // 입수량 (master, or qty/declared for FBT)
   declared_box_count: number;
+  box_prefix: string; // for FBT order_no
+  box_num_width: number; // for FBT order_no zero-padding
+  fulfillment_type: FulfillmentType;
   validation_status: ValidationStatus;
   validation_messages: string[];
 }
+
+export type FulfillmentType = "FBA" | "FBT";
 
 /** Stock + master lookups, scoped to the selected outbound warehouse. */
 export interface CjStockLookup {
@@ -84,24 +89,36 @@ const COLUMN_MAP: Record<string, string> = {
 
 const INVALID_VALUES = new Set(["", "nan", "none", "null"]);
 
-function parseBoxIdMeta(boxId: string): { start: number; end: number } {
-  if (!boxId) return { start: 0, end: 0 };
+interface BoxIdMeta {
+  start: number;
+  end: number;
+  prefix: string;
+  width: number;
+}
+
+function parseBoxIdMeta(boxId: string): BoxIdMeta {
+  if (!boxId) return { start: 0, end: 0, prefix: "", width: 0 };
   const text = String(boxId).trim();
   const range = /^([A-Za-z]*)(\d+)\s*[-~]\s*([A-Za-z]*)(\d+)$/.exec(text);
   if (range) {
     const startPrefix = range[1].toUpperCase();
     const endPrefix = range[3].toUpperCase();
     if (startPrefix && endPrefix && startPrefix !== endPrefix) {
-      return { start: 0, end: 0 };
+      return { start: 0, end: 0, prefix: "", width: 0 };
     }
-    return { start: Number(range[2]), end: Number(range[4]) };
+    return {
+      start: Number(range[2]),
+      end: Number(range[4]),
+      prefix: startPrefix || endPrefix,
+      width: Math.max(range[2].length, range[4].length),
+    };
   }
   const single = /^([A-Za-z]*)(\d+)$/.exec(text);
   if (single) {
     const n = Number(single[2]);
-    return { start: n, end: n };
+    return { start: n, end: n, prefix: single[1].toUpperCase(), width: single[2].length };
   }
-  return { start: 0, end: 0 };
+  return { start: 0, end: 0, prefix: "", width: 0 };
 }
 
 function pad2(n: number) {
@@ -155,6 +172,7 @@ function mapColumns(raw: Record<string, unknown>): Record<string, unknown> {
 export function parseFbaRows(
   rawRows: Record<string, unknown>[],
   lookup: CjStockLookup,
+  fulfillmentType: FulfillmentType = "FBA",
 ): FbaShipmentRow[] {
   const rows: FbaShipmentRow[] = [];
   rawRows.forEach((rawRow, index) => {
@@ -163,8 +181,21 @@ export function parseFbaRows(
     const sku = str(r, "sku");
     if (!shipment || !sku) return; // skip blank rows
 
-    const { start, end } = parseBoxIdMeta(str(r, "box_id_range"));
+    const { start, end, prefix, width } = parseBoxIdMeta(str(r, "box_id_range"));
     const expiryDisplay = toExpiryDisplay(r["expiry_date"]);
+    const qty = num(r, "qty");
+    const declaredBoxCount = num(r, "declared_box_count");
+
+    // FBT derives 입수량 from qty/박스수량 when it divides cleanly; FBA uses master.
+    let boxUnit = lookup.boxUnitOf(sku);
+    if (
+      fulfillmentType === "FBT" &&
+      declaredBoxCount > 0 &&
+      qty > 0 &&
+      qty % declaredBoxCount === 0
+    ) {
+      boxUnit = qty / declaredBoxCount;
+    }
 
     rows.push({
       rowNumber: index + 2,
@@ -177,14 +208,17 @@ export function parseFbaRows(
       sku,
       product_name: str(r, "product_name"),
       box_id_range: str(r, "box_id_range"),
-      qty: num(r, "qty"),
+      qty,
       expiry_display: expiryDisplay,
       expiry_norm: normalizeExpiry(expiryDisplay),
       box_start: start,
       box_end: end,
       box_count: end >= start ? end - start + 1 : 0,
-      box_unit: lookup.boxUnitOf(sku),
-      declared_box_count: num(r, "declared_box_count"),
+      box_unit: boxUnit,
+      declared_box_count: declaredBoxCount,
+      box_prefix: prefix,
+      box_num_width: width,
+      fulfillment_type: fulfillmentType,
       validation_status: "ok",
       validation_messages: [],
     });
@@ -249,6 +283,7 @@ function validateContinuity(
   sameShipment: FbaShipmentRow[],
   isFirst: boolean,
 ) {
+  if (row.fulfillment_type === "FBT") return; // FBT carton ids aren't sequential
   if (!isFirst) return;
   const ids = new Set<number>();
   for (const r of sameShipment) {

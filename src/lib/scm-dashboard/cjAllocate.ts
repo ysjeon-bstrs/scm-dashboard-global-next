@@ -306,6 +306,7 @@ export interface AllocationResult {
 export function allocateOrder(
   rows: FbaShipmentRow[],
   warehouseStock: CjLotStockRow[],
+  selectedLots: Set<string> | null = null,
 ): AllocationResult {
   // Working availability per SKU+expiry+lot, decremented across rows so the
   // same lot isn't double-allocated (port of _allocate_sku_with_lots).
@@ -325,6 +326,7 @@ export function allocateOrder(
     const lots: StockLot[] = [...avail.entries()]
       .filter(([key, qty]) => key.startsWith(prefix) && qty > 0)
       .map(([key, qty]) => ({ lot: key.slice(prefix.length), available_qty: qty }))
+      .filter((lot) => !selectedLots || selectedLots.has(lot.lot))
       .sort((a, b) => a.lot.localeCompare(b.lot));
 
     const rowAllocs = allocateRow(row, lots);
@@ -384,8 +386,14 @@ export function buildCjWmsRows(
   const out: CjWmsRow[] = [];
   let counter = 0;
 
-  const orderNo = (shipmentId: string, box: number) =>
-    `${shipmentId}U${String(box).padStart(6, "0")}`;
+  const orderNo = (row: FbaShipmentRow, box: number) => {
+    if (row.fulfillment_type === "FBT") {
+      const width = row.box_num_width || 4;
+      const prefix = row.box_prefix || "C";
+      return `IBR${row.shipment_id}-${prefix}${String(box).padStart(width, "0")}`;
+    }
+    return `${row.shipment_id}U${String(box).padStart(6, "0")}`;
+  };
 
   for (const alloc of allocations) {
     const row = shipInfo.get(
@@ -427,10 +435,10 @@ export function buildCjWmsRows(
     };
 
     if (isMixed) {
-      out.push(makeRow(orderNo(alloc.shipment_id, alloc.box_start), alloc.allocated_qty));
+      out.push(makeRow(orderNo(row, alloc.box_start), alloc.allocated_qty));
     } else {
       for (let box = alloc.box_start; box <= alloc.box_end; box += 1) {
-        out.push(makeRow(orderNo(alloc.shipment_id, box), boxUnit));
+        out.push(makeRow(orderNo(row, box), boxUnit));
       }
     }
   }

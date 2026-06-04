@@ -111,7 +111,7 @@ interface CjAllocationClientProps {
 // CJ storage is billed per pallet (a partial pallet still counts as one).
 const PALLET_MONTHLY_USD = 25;
 
-const OUTBOUND_TYPES = ["FBA", "TikTokShop", "B2B"] as const;
+const OUTBOUND_TYPES = ["FBA", "FBT"] as const;
 const DEPOT_OPTIONS = [
   "CJLA 1 Amazon",
   "CJLA 2 TikTokShop",
@@ -133,6 +133,8 @@ export default function CjAllocationClient({
   const [uploadRows, setUploadRows] = useState<Record<string, unknown>[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [manualLots, setManualLots] = useState(false);
+  const [selectedLotSet, setSelectedLotSet] = useState<Set<string>>(new Set());
   const [allocResult, setAllocResult] = useState<AllocationResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -384,10 +386,10 @@ export default function CjAllocationClient({
   }, [stockRows, depot]);
 
   const validation = useMemo(() => {
-    const rows = parseFbaRows(uploadRows, stockLookup);
+    const rows = parseFbaRows(uploadRows, stockLookup, outboundType);
     validateShipmentRows(rows, stockLookup, stockRows.length > 0);
     return summarizeValidation(rows);
-  }, [uploadRows, stockLookup, stockRows.length]);
+  }, [uploadRows, stockLookup, stockRows.length, outboundType]);
 
   const validRows = useMemo(
     () => validation.rows.filter((row) => row.validation_status !== "error"),
@@ -404,6 +406,35 @@ export default function CjAllocationClient({
     () => checkSufficiency(validRows, warehouseStock),
     [validRows, warehouseStock],
   );
+
+  // Lots eligible for the order (requested SKU+expiry at the warehouse).
+  const candidateLots = useMemo(() => {
+    const wanted = new Set(validRows.map((r) => `${r.sku}|${r.expiry_norm}`));
+    return warehouseStock
+      .filter((r) =>
+        wanted.has(`${r.resource_code}|${normalizeExpiry(r.expiration_date ?? "")}`),
+      )
+      .sort(
+        (a, b) =>
+          a.resource_code.localeCompare(b.resource_code) ||
+          (a.expiration_date ?? "").localeCompare(b.expiration_date ?? "") ||
+          a.lot_no.localeCompare(b.lot_no),
+      );
+  }, [validRows, warehouseStock]);
+
+  function enableManualLots(on: boolean) {
+    setManualLots(on);
+    if (on) setSelectedLotSet(new Set(candidateLots.map((l) => l.lot_no)));
+  }
+
+  function toggleLot(lotNo: string, checked: boolean) {
+    setSelectedLotSet((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(lotNo);
+      else next.delete(lotNo);
+      return next;
+    });
+  }
 
   const validationColumnDefs = useMemo<ColDef<FbaShipmentRow>[]>(
     () => [
@@ -503,6 +534,8 @@ export default function CjAllocationClient({
     setUploadRows([]);
     setFileName(null);
     setAllocResult(null);
+    setManualLots(false);
+    setSelectedLotSet(new Set());
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -511,7 +544,11 @@ export default function CjAllocationClient({
   function allocate() {
     setIsAllocating(true);
     setError(null);
-    const result = allocateOrder(validRows, warehouseStock);
+    const result = allocateOrder(
+      validRows,
+      warehouseStock,
+      manualLots ? selectedLotSet : null,
+    );
     setAllocResult(result);
     setMessage(
       `배정 완료 — ${result.allocations.length.toLocaleString()}개 로트 배정` +
@@ -992,6 +1029,111 @@ export default function CjAllocationClient({
                     </ul>
                   </div>
                 ) : null}
+              </div>
+            ) : null}
+
+            {validRows.length > 0 &&
+            validation.errorCount === 0 &&
+            stockSufficiency.length === 0 ? (
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="step-no">4</span>
+                  <h3 className="text-sm font-semibold text-ink">로트 선택</h3>
+                  <label className="ml-1 flex items-center gap-1.5 text-xs font-medium text-muted">
+                    <input
+                      checked={manualLots}
+                      className="h-4 w-4 accent-brand"
+                      onChange={(event) =>
+                        enableManualLots(event.currentTarget.checked)
+                      }
+                      type="checkbox"
+                    />
+                    수동 선택 (끄면 자동 · 로트번호 순)
+                  </label>
+                </div>
+                {manualLots ? (
+                  <>
+                    <div className="overflow-x-auto rounded-xl border border-line">
+                      <table className="w-full text-sm">
+                        <thead className="bg-sunken/60 text-xs text-faint">
+                          <tr>
+                            <th className="px-3 py-2 text-left">
+                              <input
+                                checked={
+                                  candidateLots.length > 0 &&
+                                  candidateLots.every((l) =>
+                                    selectedLotSet.has(l.lot_no),
+                                  )
+                                }
+                                className="h-4 w-4 accent-brand"
+                                onChange={(event) =>
+                                  setSelectedLotSet(
+                                    event.currentTarget.checked
+                                      ? new Set(candidateLots.map((l) => l.lot_no))
+                                      : new Set(),
+                                  )
+                                }
+                                type="checkbox"
+                              />
+                            </th>
+                            <th className="px-3 py-2 text-left">품번</th>
+                            <th className="px-3 py-2 text-left">유통기한</th>
+                            <th className="px-3 py-2 text-left">로트번호</th>
+                            <th className="px-3 py-2 text-right">가용수량</th>
+                            <th className="px-3 py-2 text-right">입수량</th>
+                            <th className="px-3 py-2 text-right">가능박스</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {candidateLots.map((l) => {
+                            const upb = l.units_per_box ?? 0;
+                            const boxes =
+                              upb > 0 ? Math.floor((l.available_qty || 0) / upb) : 0;
+                            return (
+                              <tr
+                                className="border-t border-line"
+                                key={`${l.resource_code}-${l.expiration_date}-${l.lot_no}`}
+                              >
+                                <td className="px-3 py-1.5">
+                                  <input
+                                    checked={selectedLotSet.has(l.lot_no)}
+                                    className="h-4 w-4 accent-brand"
+                                    onChange={(event) =>
+                                      toggleLot(l.lot_no, event.currentTarget.checked)
+                                    }
+                                    type="checkbox"
+                                  />
+                                </td>
+                                <td className="px-3 py-1.5 font-mono">
+                                  {l.resource_code}
+                                </td>
+                                <td className="px-3 py-1.5">{l.expiration_date}</td>
+                                <td className="px-3 py-1.5 font-mono">{l.lot_no}</td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">
+                                  {l.available_qty.toLocaleString()}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">
+                                  {upb > 0 ? upb.toLocaleString() : "—"}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">
+                                  {boxes.toLocaleString()}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-faint">
+                      선택 {selectedLotSet.size}개 / 후보 {candidateLots.length}개
+                      로트 — 체크한 로트에서만 배정합니다.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-faint">
+                    자동 배정: 요청 유통기한의 모든 로트를 로트번호 순으로 사용합니다.
+                  </p>
+                )}
               </div>
             ) : null}
           </div>
