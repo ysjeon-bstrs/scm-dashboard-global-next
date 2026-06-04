@@ -165,24 +165,72 @@ export default function CjAllocationClient({
 
   const stockColumnDefs = useMemo<ColDef<CjLotStockRow>[]>(
     () => [
-      { field: "close_date", headerName: "Close date", minWidth: 120 },
-      { field: "depot_code", headerName: "Depot", minWidth: 130 },
+      { field: "depot_code", headerName: "가상센터", minWidth: 130 },
       {
         field: "resource_code",
-        headerName: "SKU",
-        minWidth: 120,
+        headerName: "품번",
+        minWidth: 110,
         cellClass: "cell-code",
       },
-      { field: "resource_name", headerName: "Name", minWidth: 220, flex: 1 },
-      { field: "lot_no", headerName: "Lot", minWidth: 120, cellClass: "cell-code" },
-      { field: "expiration_date", headerName: "Expiry", minWidth: 120 },
+      { field: "resource_name", headerName: "상품명", minWidth: 240, flex: 1 },
+      {
+        field: "lot_no",
+        headerName: "로트번호",
+        minWidth: 110,
+        cellClass: "cell-code",
+      },
+      { field: "expiration_date", headerName: "유통기한", minWidth: 110 },
       {
         field: "available_qty",
         headerName: "가용수량",
         headerTooltip: "CJ 가용수량 (EA)",
-        minWidth: 130,
+        minWidth: 110,
         type: "numericColumn",
         cellClass: "cell-num cell-allocated",
+      },
+      {
+        field: "units_per_box",
+        headerName: "입수량",
+        headerTooltip: "박스당 입수 (마스터)",
+        minWidth: 90,
+        type: "numericColumn",
+        cellClass: "cell-num",
+        valueFormatter: (params) =>
+          params.value == null ? "미등록" : Number(params.value).toLocaleString(),
+      },
+      {
+        headerName: "박스",
+        headerTooltip: "⌊가용수량 / 입수량⌋",
+        minWidth: 90,
+        type: "numericColumn",
+        cellClass: "cell-num",
+        valueGetter: (params) => {
+          const u = params.data?.units_per_box;
+          const a = params.data?.available_qty ?? 0;
+          return u && u > 0 ? Math.floor(a / u) : 0;
+        },
+      },
+      {
+        headerName: "잔여",
+        headerTooltip: "가용수량 mod 입수량 (낱개)",
+        minWidth: 90,
+        type: "numericColumn",
+        cellClass: "cell-num",
+        valueGetter: (params) => {
+          const u = params.data?.units_per_box;
+          const a = params.data?.available_qty ?? 0;
+          return u && u > 0 ? a % u : a;
+        },
+      },
+      {
+        headerName: "비고",
+        minWidth: 130,
+        valueGetter: (params) => {
+          const u = params.data?.units_per_box;
+          const a = params.data?.available_qty ?? 0;
+          const loose = u && u > 0 ? a % u : a;
+          return loose > 0 ? "잔여/혼입 가능" : "";
+        },
       },
     ],
     [],
