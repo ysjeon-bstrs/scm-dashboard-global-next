@@ -154,6 +154,7 @@ export default function CjAllocationClient({
   const [stockRows, setStockRows] = useState<CjLotStockRow[]>([]);
   const [uploadRows, setUploadRows] = useState<Record<string, unknown>[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [allocationRows, setAllocationRows] = useState<CjLotAllocationRow[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -802,7 +803,33 @@ export default function CjAllocationClient({
                 </h3>
               </div>
 
-              <div className="rounded-xl border border-dashed border-line bg-sunken/60 p-3">
+              <div
+                aria-label="출고 요청 파일 업로드 (클릭 또는 드래그)"
+                className={`cursor-pointer rounded-xl border-2 border-dashed p-3 transition ${
+                  dragOver
+                    ? "border-brand bg-brand-soft/50"
+                    : "border-line bg-sunken/60 hover:border-line-strong"
+                }`}
+                onClick={() => fileInputRef.current?.click()}
+                onDragLeave={() => setDragOver(false)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragOver(true);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragOver(false);
+                  void handleFile(event.dataTransfer.files?.[0] ?? null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
                 <input
                   accept=".xlsx,.xls"
                   className="hidden"
@@ -826,7 +853,10 @@ export default function CjAllocationClient({
                     <div className="flex shrink-0 items-center gap-2">
                       <button
                         className="btn btn-ghost"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
                         type="button"
                       >
                         다른 파일
@@ -834,7 +864,10 @@ export default function CjAllocationClient({
                       <button
                         aria-label="업로드 파일 제거"
                         className="btn btn-ghost text-danger"
-                        onClick={clearUpload}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          clearUpload();
+                        }}
                         type="button"
                       >
                         ✕ 제거
@@ -842,18 +875,12 @@ export default function CjAllocationClient({
                     </div>
                   </div>
                 ) : (
-                  <button
-                    className="flex w-full cursor-pointer flex-col items-center gap-1 py-4 text-center"
-                    onClick={() => fileInputRef.current?.click()}
-                    type="button"
-                  >
+                  <div className="flex flex-col items-center gap-1 py-5 text-center">
                     <span className="text-sm font-medium text-ink">
-                      출고 요청 엑셀을 선택하세요
+                      출고 요청 엑셀을 드래그하거나 클릭해서 선택
                     </span>
-                    <span className="text-xs text-faint">
-                      XLSX · XLS — 클릭해서 파일 선택
-                    </span>
-                  </button>
+                    <span className="text-xs text-faint">XLSX · XLS</span>
+                  </div>
                 )}
               </div>
 
