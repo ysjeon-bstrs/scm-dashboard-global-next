@@ -74,6 +74,15 @@ const STATUS_ICON: Record<ValidationStatus, string> = {
   error: "❌",
 };
 
+interface LotResidualRow {
+  resource_code: string;
+  expiration_date: string | null;
+  lot_no: string;
+  available_qty: number;
+  allocated_qty: number;
+  residual_qty: number;
+}
+
 function downloadCjWmsWorkbook(
   allocations: LotAllocation[],
   rows: FbaShipmentRow[],
@@ -463,6 +472,70 @@ export default function CjAllocationClient({
     }
     return [...groups.values()];
   }, [validRows, candidateLots]);
+
+  // Per-lot remaining quantity after allocation (가용 − 배정).
+  const lotResidual = useMemo<LotResidualRow[]>(() => {
+    const allocs = allocResult?.allocations ?? [];
+    if (allocs.length === 0) return [];
+    const allocByKey = new Map<string, number>();
+    for (const a of allocs) {
+      const key = `${a.sku}|${normalizeExpiry(a.expiry_display)}|${a.lot}`;
+      allocByKey.set(key, (allocByKey.get(key) ?? 0) + a.allocated_qty);
+    }
+    return candidateLots.map((l) => {
+      const key = `${l.resource_code}|${normalizeExpiry(l.expiration_date ?? "")}|${l.lot_no}`;
+      const allocated = allocByKey.get(key) ?? 0;
+      return {
+        resource_code: l.resource_code,
+        expiration_date: l.expiration_date,
+        lot_no: l.lot_no,
+        available_qty: l.available_qty,
+        allocated_qty: allocated,
+        residual_qty: l.available_qty - allocated,
+      };
+    });
+  }, [allocResult, candidateLots]);
+
+  const residualColumnDefs = useMemo<ColDef<LotResidualRow>[]>(
+    () => [
+      {
+        field: "resource_code",
+        headerName: "품번",
+        minWidth: 100,
+        cellClass: "cell-code",
+      },
+      { field: "expiration_date", headerName: "유통기한", minWidth: 110 },
+      {
+        field: "lot_no",
+        headerName: "로트번호",
+        minWidth: 110,
+        cellClass: "cell-code",
+      },
+      {
+        field: "available_qty",
+        headerName: "가용수량",
+        minWidth: 110,
+        type: "numericColumn",
+        cellClass: "cell-num",
+      },
+      {
+        field: "allocated_qty",
+        headerName: "배정수량",
+        minWidth: 110,
+        type: "numericColumn",
+        cellClass: "cell-num cell-allocated",
+      },
+      {
+        field: "residual_qty",
+        headerName: "잔여수량",
+        headerTooltip: "가용수량 − 배정수량",
+        minWidth: 110,
+        type: "numericColumn",
+        cellClass: "cell-num",
+      },
+    ],
+    [],
+  );
 
   function enableManualLots(on: boolean) {
     setManualLots(on);
@@ -1224,6 +1297,25 @@ export default function CjAllocationClient({
               rowData={allocations}
             />
           </GridFrame>
+
+          {lotResidual.length > 0 ? (
+            <div className="mt-5">
+              <h3 className="mb-2 text-sm font-semibold text-ink">
+                배정 후 로트 잔여
+              </h3>
+              <div
+                className="ag-theme-quartz w-full overflow-hidden rounded-xl border border-line"
+                style={{ height: 240 }}
+              >
+                <AgGridReact<LotResidualRow>
+                  autoSizeStrategy={{ type: "fitGridWidth" }}
+                  columnDefs={residualColumnDefs}
+                  defaultColDef={{ resizable: true, sortable: true }}
+                  rowData={lotResidual}
+                />
+              </div>
+            </div>
+          ) : null}
         </Panel>
       </div>
     </main>
