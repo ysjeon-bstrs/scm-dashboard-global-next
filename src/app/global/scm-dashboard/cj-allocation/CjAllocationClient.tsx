@@ -721,7 +721,7 @@ export default function CjAllocationClient({
               </button>
             </>
           }
-          description="회사 MySQL의 cj_stock(가용재고)을 상품 마스터(입수량)와 합쳐 SKU·유통기한별로 요약하고, 업로드한 요청 수량을 FEFO로 로트 배정합니다. DB에는 쓰지 않습니다."
+          description="부스터스 DB의 cj_stock을 상품 마스터(입수량)와 합쳐 SKU·유통기한별로 요약하고, 업로드한 요청 수량을 FEFO로 로트 배정합니다."
           eyebrow="CJ pilot"
           title="CJ Lot Allocation"
         />
