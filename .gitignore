@@ -35,6 +35,11 @@ dev-server*.log
 .env*
 !.env.example
 
+# local Claude Code config + bkit tool state (not shared)
+.claude/settings.local.json
+docs/.bkit-memory.json
+docs/.pdca-status.json
+
 # vercel
 .vercel
 
