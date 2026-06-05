@@ -1,7 +1,7 @@
 # Retrospective
 
-Project-specific learnings that carry across Claude Code sessions. Written by
-`/wrapup` (with my approval), read at the start of relevant work.
+Project-specific learnings that carry across Codex/Claude Code sessions. Written by
+`$wrapup` or `/wrapup` (with my approval), read at the start of relevant work.
 
 This is NOT general task history or a changelog. It holds only durable,
 project-specific knowledge: conventions, decisions, and anti-patterns.
@@ -15,12 +15,15 @@ project-specific knowledge: conventions, decisions, and anti-patterns.
 - 회사 SCM MySQL은 read-only 풀(env `SCM_SOURCE_DB_*`, legacy `BOOSTERS_SCM_MYSQL_*`); `.env.local`에 실 자격증명 → 배포 사이클 대신 `node --env-file=.env.local`로 read-only SELECT 검증 (앱은 boosters.kr 인증 게이트라 로컬 브라우저 테스트 불가).
 - 디자인 = impeccable(`.impeccable.md`): OKLCH tinted 팔레트 + Pretendard, 공유 프리미티브 `src/components/scm-dashboard/ui.tsx`, 토큰/공통 클래스 `globals.css`, AG 그리드는 flush + 전 컬럼 좌측정렬, 라이트 전용.
 - Git: `main` 직접 push; push 전 `npm run lint && npx tsc --noEmit && npm run build`. 기능 커밋엔 기존 OSS 정리 변경(.env.example/README/docs/ 등) 섞지 말고 파일을 명시적으로 스테이징.
+- Wrap-up 하네스는 Codex 전역 skill `C:\Users\BST-Desktop-051\.agents\skills\wrapup\SKILL.md`와 repo `AGENTS.md`의 Project memory 섹션으로 연결한다.
 
 ## Anti-patterns / gotchas
 
 - CJ WMS 다운로드는 전량 배정(shortageEa === 0)일 때만 허용 — 부족분이 있으면 막아야 부분 파일이 안 나간다.
+- Windows PowerShell `Get-Content` 출력이 한글 mojibake처럼 보여도 파일 인코딩 문제로 단정하지 말고 IDE/UTF-8 검사 결과를 우선 확인한다.
 
 ## Open threads
 
+- `AGENTS.md`의 Project memory 섹션 추가분은 아직 미커밋 상태이므로 사용자가 검토 후 커밋 여부를 결정한다.
 - 포털(`yoochiho/scm_portal`) 이식 보류 — 가능성 검증됨(WRITE 권한, 동일 스택, 같은 SCM DB). 작업: Supabase→`requireUser`/`withAuth`, DB→`queryMysqlScm`(positional `?`·제네릭 미지원), 포털 톤 리스킨, 네비 등록은 `automationNavigation.ts` 또는 `/settings/tabs`.
 - 메인 SCM 대시보드 페이지는 CJ 페이지 수준의 정리(데이터·디자인)가 아직 미적용.
