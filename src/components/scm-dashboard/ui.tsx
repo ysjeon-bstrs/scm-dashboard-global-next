@@ -109,7 +109,7 @@ export function GridFrame({
   children: ReactNode;
 }) {
   return (
-    <div className="-mx-4 -mb-4 overflow-hidden rounded-b-[var(--radius-panel)] border-t border-line sm:-mx-5 sm:-mb-5">
+    <div className="overflow-hidden rounded-xl border border-line">
       <div className="ag-theme-quartz w-full" style={{ height }}>
         {children}
       </div>
