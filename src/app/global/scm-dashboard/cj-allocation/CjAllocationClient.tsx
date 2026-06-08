@@ -3,7 +3,6 @@
 import { AllEnterpriseModule, LicenseManager } from "ag-grid-enterprise";
 import { ModuleRegistry, type ColDef } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
@@ -35,10 +34,8 @@ import type {
 import type { UserSummary } from "@/lib/scm-dashboard/types";
 import {
   Banner,
-  BrandMark,
   Collapsible,
   GridFrame,
-  PageHeader,
   Panel,
   PanelHeader,
   Stat,
@@ -68,10 +65,16 @@ async function readSheetRows(file: File): Promise<Record<string, unknown>[]> {
   });
 }
 
-const STATUS_ICON: Record<ValidationStatus, string> = {
-  ok: "✅",
-  warning: "⚠️",
-  error: "❌",
+const STATUS_LABEL: Record<ValidationStatus, string> = {
+  ok: "정상",
+  warning: "경고",
+  error: "오류",
+};
+
+const STATUS_TONE: Record<ValidationStatus, "ok" | "warn" | "danger"> = {
+  ok: "ok",
+  warning: "warn",
+  error: "danger",
 };
 
 interface LotResidualRow {
@@ -151,7 +154,9 @@ export default function CjAllocationClient({
   const [isAllocating, setIsAllocating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useMemo(() => registerAgGrid(), []);
+  useEffect(() => {
+    registerAgGrid();
+  }, []);
 
   const stockColumnDefs = useMemo<ColDef<CjLotStockRow>[]>(
     () => [
@@ -555,10 +560,17 @@ export default function CjAllocationClient({
     () => [
       {
         headerName: "상태",
-        minWidth: 70,
-        maxWidth: 80,
+        minWidth: 86,
+        maxWidth: 100,
+        cellClass: "pill-cell",
         valueGetter: (params) =>
-          params.data ? STATUS_ICON[params.data.validation_status] : "",
+          params.data ? params.data.validation_status : "",
+        cellRenderer: (params: { value?: ValidationStatus }) =>
+          params.value ? (
+            <StatusPill tone={STATUS_TONE[params.value]}>
+              {STATUS_LABEL[params.value]}
+            </StatusPill>
+          ) : null,
       },
       { field: "reference_number", headerName: "Ref No.", minWidth: 150, cellClass: "cell-code" },
       { field: "shipment_id", headerName: "Shipment ID", minWidth: 130, cellClass: "cell-code" },
@@ -629,10 +641,6 @@ export default function CjAllocationClient({
     }
   }
 
-  async function signOut() {
-    await fetch("/api/auth/signout", { method: "POST" });
-    window.location.reload();
-  }
 
   async function handleFile(file: File | null) {
     if (!file) return;
@@ -677,16 +685,15 @@ export default function CjAllocationClient({
   if (!user) {
     return (
       <main className="flex min-h-dvh items-center justify-center px-4 py-12">
-        <section className="panel w-full max-w-lg p-7 sm:p-9">
-          <BrandMark className="h-10 w-10" />
-          <p className="eyebrow mt-5">Protected pilot</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
-            CJ Lot Allocation
+        <section className="panel w-full max-w-lg p-6 sm:p-8">
+          <p className="eyebrow">글로벌 SCM</p>
+          <h1 className="mt-2 text-xl font-semibold tracking-tight text-ink">
+            CJ 로트 배정 접근
           </h1>
           <p className="mt-3 text-sm leading-6 text-muted">
             {initialAuthError === "forbidden-domain"
-              ? "boosters.kr Google account is required."
-              : "Sign in with your boosters.kr Google account."}
+              ? "boosters.kr Google 계정으로만 접근할 수 있습니다."
+              : "boosters.kr Google 계정으로 로그인하세요."}
           </p>
           {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
           <button
@@ -694,7 +701,7 @@ export default function CjAllocationClient({
             onClick={signInWithGoogle}
             type="button"
           >
-            Sign in with Google
+            Google로 로그인
           </button>
         </section>
       </main>
@@ -703,31 +710,73 @@ export default function CjAllocationClient({
 
   const allocations = allocResult?.allocations ?? [];
   const shortageEa = allocResult?.shortageEa ?? 0;
+  const canAllocate =
+    validRows.length > 0 && validation.errorCount === 0 && !isAllocating;
+  const canDownload = allocations.length > 0 && shortageEa === 0;
+  const downloadBlocker = !fileName
+    ? "출고 요청 파일을 업로드해야 합니다."
+    : validation.errorCount > 0
+      ? `검증 오류 ${validation.errorCount.toLocaleString()}건을 먼저 수정해야 합니다.`
+      : validRows.length === 0
+        ? "다운로드할 유효 요청 행이 없습니다."
+        : allocations.length === 0
+          ? "로트 배정을 먼저 실행해야 합니다."
+          : shortageEa > 0
+            ? `부족 ${shortageEa.toLocaleString()} EA가 있어 전량 배정 후 다운로드할 수 있습니다.`
+            : "CJ WMS 다운로드 가능";
+  const readinessSteps = [
+    {
+      label: "재고",
+      value: stockRows.length > 0 ? `${stockRows.length.toLocaleString()}개 로트` : "로드 필요",
+      tone: stockRows.length > 0 ? "ok" : "warn",
+    },
+    {
+      label: "파일",
+      value: fileName ? `${validation.rows.length.toLocaleString()}행` : "업로드 대기",
+      tone: fileName ? "ok" : "neutral",
+    },
+    {
+      label: "검증",
+      value: validation.rows.length
+        ? `오류 ${validation.errorCount.toLocaleString()}건`
+        : "미실행",
+      tone: validation.errorCount > 0 ? "danger" : validation.rows.length ? "ok" : "neutral",
+    },
+    {
+      label: "배정",
+      value: allocations.length
+        ? `${allocations.length.toLocaleString()}개 로트`
+        : "미실행",
+      tone: shortageEa > 0 ? "danger" : allocations.length ? "ok" : "neutral",
+    },
+    {
+      label: "WMS",
+      value: canDownload ? "다운로드 가능" : "대기",
+      tone: canDownload ? "ok" : validation.errorCount > 0 || shortageEa > 0 ? "danger" : "warn",
+    },
+  ] as const;
 
   return (
-    <main className="min-h-dvh px-4 py-6 sm:px-6 lg:px-8">
-      <div className="stagger mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <PageHeader
-          actions={
-            <>
-              <Link className="btn btn-secondary" href="/global/scm-dashboard">
-                Dashboard
-              </Link>
-              <span className="max-w-[14rem] truncate px-1 text-sm text-muted">
-                {user.email}
-              </span>
-              <button className="btn btn-secondary" onClick={signOut} type="button">
-                Sign out
-              </button>
-            </>
-          }
-          description="부스터스 DB의 cj_stock을 상품 마스터(입수량)와 합쳐 SKU·유통기한별로 요약하고, 업로드한 요청 수량을 FEFO로 로트 배정합니다."
-          eyebrow="CJ pilot"
-          title="CJ Lot Allocation"
-        />
+    <main className="min-h-dvh px-4 py-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+        <header className="flex flex-col gap-3 border-b border-line pb-4 md:flex-row md:items-end md:justify-between">
+          <div className="min-w-0">
+            <p className="eyebrow">글로벌 SCM / CJ 출고 배정</p>
+            <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+              CJ 로트 배정
+            </h1>
+            <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">
+              업로드 요청을 검증하고 FEFO 기준으로 로트를 배정한 뒤, 다운로드 가능 여부를 바로 확인합니다.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+            <StatusPill tone="brand">{outboundType}</StatusPill>
+            <StatusPill tone="brand">{depot}</StatusPill>
+          </div>
+        </header>
 
         {snapshot.closeDate ? (
-          <p className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-faint">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-faint">
             <span>
               마감일 <span className="font-medium text-muted">{snapshot.closeDate}</span>
             </span>
@@ -742,34 +791,26 @@ export default function CjAllocationClient({
         {message ? <Banner tone="brand">{message}</Banner> : null}
         {error ? <Banner tone="danger">{error}</Banner> : null}
 
-        <Panel>
-          <div className="grid gap-6 lg:grid-cols-[1.3fr_3fr] lg:gap-9">
-            <div className="lg:border-r lg:border-line lg:pr-9">
-              <p className="eyebrow">CJ 가용재고</p>
-              <p className="mt-3 text-[2.75rem] leading-none font-semibold tracking-tight tabular-nums text-ink">
-                {summary.kpis.totalAvailable.toLocaleString()}
-              </p>
-              <p className="mt-2 text-xs text-faint">
-                {centerFilter === "전체"
-                  ? "전 센터 합계 (EA)"
-                  : `${centerFilter} 합계 (EA)`}
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
-              <Stat label="센터수" value={summary.kpis.depotCount.toLocaleString()} />
-              <Stat label="품목수" value={summary.kpis.skuCount.toLocaleString()} />
-              <Stat label="로트수" value={summary.kpis.lotCount.toLocaleString()} />
-              <Stat
-                hint={`≈ $${(summary.kpis.billedPallets * PALLET_MONTHLY_USD).toLocaleString()}/월 · 팔렛당 $${PALLET_MONTHLY_USD}${
-                  summary.kpis.palletUnknownGroups > 0
-                    ? ` · 미산정 ${summary.kpis.palletUnknownGroups}건`
-                    : ""
-                }`}
-                label="예상 보관 팔렛"
-                tone="brand"
-                value={summary.kpis.billedPallets.toLocaleString()}
-              />
-            </div>
+        <Panel className="p-3 sm:p-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Stat
+              hint={centerFilter === "전체" ? "전 센터 합계 EA" : `${centerFilter} 합계 EA`}
+              label="가용재고"
+              value={summary.kpis.totalAvailable.toLocaleString()}
+            />
+            <Stat label="센터수" value={summary.kpis.depotCount.toLocaleString()} />
+            <Stat label="품목수" value={summary.kpis.skuCount.toLocaleString()} />
+            <Stat label="로트수" value={summary.kpis.lotCount.toLocaleString()} />
+            <Stat
+              hint={`≈ $${(summary.kpis.billedPallets * PALLET_MONTHLY_USD).toLocaleString()}/월${
+                summary.kpis.palletUnknownGroups > 0
+                  ? ` · 미산정 ${summary.kpis.palletUnknownGroups}건`
+                  : ""
+              }`}
+              label="예상 보관 팔렛"
+              tone="brand"
+              value={summary.kpis.billedPallets.toLocaleString()}
+            />
           </div>
         </Panel>
 
@@ -863,17 +904,48 @@ export default function CjAllocationClient({
         </Collapsible>
 
         <Panel>
-          <PanelHeader eyebrow="Outbound" title="CJ outbound allocation" />
-          <p className="-mt-2 mb-5 max-w-2xl text-sm leading-6 text-muted">
-            Pick the outbound type and warehouse, then upload the request file.
-            Files are parsed in memory only — nothing is written back.
+          <PanelHeader eyebrow="출고 배정" title="CJ WMS 다운로드 준비" />
+          <p className="-mt-2 mb-4 max-w-2xl text-sm leading-6 text-muted">
+            출고 유형과 창고를 선택하고 요청 파일을 업로드하세요. 파일은 브라우저 메모리에서만 검증됩니다.
           </p>
+
+          <div className={`mb-5 rounded-xl border px-4 py-3 ${
+            canDownload
+              ? "border-ok/30 bg-ok-soft text-ok-ink"
+              : validation.errorCount > 0 || shortageEa > 0
+                ? "border-danger/30 bg-danger-soft text-danger-ink"
+                : "border-warn/30 bg-warn-soft text-warn-ink"
+          }`}>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold">
+                  {canDownload ? "CJ WMS 다운로드 가능" : `다운로드 대기: ${downloadBlocker}`}
+                </p>
+                <p className="mt-1 text-xs opacity-85">
+                  재고, 파일, 검증, 배정 상태를 모두 통과해야 WMS 양식을 받을 수 있습니다.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-5 lg:min-w-[560px]">
+                {readinessSteps.map((step) => (
+                  <div
+                    className="rounded-lg bg-surface/80 px-3 py-2 text-ink ring-1 ring-line"
+                    key={step.label}
+                  >
+                    <p className="field-label">{step.label}</p>
+                    <div className="mt-1">
+                      <StatusPill tone={step.tone}>{step.value}</StatusPill>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-6">
             <div className="space-y-2.5">
               <div className="flex items-center gap-2.5">
                 <span className="step-no">1</span>
-                <h3 className="text-sm font-semibold text-ink">Outbound type</h3>
+                <h3 className="text-sm font-semibold text-ink">출고 유형</h3>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {OUTBOUND_TYPES.map((type) => (
@@ -894,7 +966,7 @@ export default function CjAllocationClient({
               <div className="flex items-center gap-2.5">
                 <span className="step-no">2</span>
                 <h3 className="text-sm font-semibold text-ink">
-                  Outbound warehouse
+                  출고 창고
                 </h3>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -1014,11 +1086,7 @@ export default function CjAllocationClient({
                 <div className="flex flex-wrap gap-2">
                   <button
                     className="btn btn-primary"
-                    disabled={
-                      validRows.length === 0 ||
-                      validation.errorCount > 0 ||
-                      isAllocating
-                    }
+                    disabled={!canAllocate}
                     onClick={allocate}
                     type="button"
                   >
@@ -1026,13 +1094,9 @@ export default function CjAllocationClient({
                   </button>
                   <button
                     className="btn btn-secondary"
-                    disabled={allocations.length === 0 || shortageEa > 0}
+                    disabled={!canDownload}
                     onClick={() => downloadCjWmsWorkbook(allocations, validRows)}
-                    title={
-                      shortageEa > 0
-                        ? "부족분이 있어 다운로드할 수 없습니다 (전량 배정 필요)"
-                        : undefined
-                    }
+                    title={!canDownload ? downloadBlocker : undefined}
                     type="button"
                   >
                     CJ WMS 다운로드
@@ -1054,14 +1118,14 @@ export default function CjAllocationClient({
                 </div>
 
                 <div className="grid grid-cols-3 gap-x-6 gap-y-4 rounded-xl border border-line bg-sunken/40 px-4 py-3">
-                  <Stat label="✅ 정상" value={validation.okCount.toLocaleString()} />
+                  <Stat label="정상" value={validation.okCount.toLocaleString()} />
                   <Stat
-                    label="⚠️ 경고"
+                    label="경고"
                     tone={validation.warningCount > 0 ? "warn" : "neutral"}
                     value={validation.warningCount.toLocaleString()}
                   />
                   <Stat
-                    label="❌ 오류"
+                    label="오류"
                     tone={validation.errorCount > 0 ? "danger" : "neutral"}
                     value={validation.errorCount.toLocaleString()}
                   />
@@ -1081,7 +1145,7 @@ export default function CjAllocationClient({
                 {validation.errorCount > 0 ? (
                   <div className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-ink">
                     <p className="font-semibold">
-                      ❌ 오류가 있는 행이 {validation.errorCount}건 있습니다. 엑셀
+                      오류가 있는 행이 {validation.errorCount}건 있습니다. 엑셀
                       파일을 수정 후 다시 업로드해주세요.
                     </p>
                     <ul className="mt-2 space-y-2">
@@ -1106,7 +1170,7 @@ export default function CjAllocationClient({
                 {validation.warningCount > 0 ? (
                   <div className="rounded-xl bg-warn-soft px-4 py-3 text-sm text-warn-ink">
                     <p className="font-semibold">
-                      ⚠️ 경고 {validation.warningCount}건
+                      경고 {validation.warningCount}건
                     </p>
                     <ul className="mt-2 space-y-2">
                       {validation.rows
@@ -1130,7 +1194,7 @@ export default function CjAllocationClient({
                 {validation.shortages.length > 0 ? (
                   <div className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-ink">
                     <p className="font-semibold">
-                      ❌ 재고 부족 — {depot} 기준, 요청 수량이 가용재고를 초과합니다.
+                      재고 부족: {depot} 기준 요청 수량이 가용재고를 초과합니다.
                     </p>
                     <ul className="mt-2 space-y-1">
                       {validation.shortages.map((s) => (
@@ -1260,16 +1324,12 @@ export default function CjAllocationClient({
               value={shortageEa.toLocaleString()}
             />
           </div>
-          <p className="mt-4 flex flex-wrap items-center gap-2 text-xs text-faint">
-            현재 선택
-            <StatusPill tone="brand">{outboundType}</StatusPill>
-            <StatusPill tone="brand">{depot}</StatusPill>
-          </p>
+
         </Panel>
 
         <Panel>
           <PanelHeader
-            eyebrow="Result"
+            eyebrow="배정 결과"
             meta={`${allocations.length.toLocaleString()} lots`}
             title="로트 배정 결과"
           />
@@ -1280,8 +1340,8 @@ export default function CjAllocationClient({
           </p>
           {shortageEa > 0 ? (
             <div className="mb-3 rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-ink">
-              ❌ 부족 {shortageEa.toLocaleString()} EA — 전량 배정되지 않아 CJ WMS
-              다운로드가 막혀 있습니다. (박스 단위로 떨어지지 않는 잔여 등)
+              부족 {shortageEa.toLocaleString()} EA: 전량 배정되지 않아 CJ WMS
+              다운로드가 막혀 있습니다. 박스 단위로 떨어지지 않는 잔여를 확인하세요.
             </div>
           ) : null}
           <GridFrame height={360}>
