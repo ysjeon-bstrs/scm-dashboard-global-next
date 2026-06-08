@@ -154,9 +154,7 @@ export default function CjAllocationClient({
   const [isAllocating, setIsAllocating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    registerAgGrid();
-  }, []);
+  registerAgGrid();
 
   const stockColumnDefs = useMemo<ColDef<CjLotStockRow>[]>(
     () => [
