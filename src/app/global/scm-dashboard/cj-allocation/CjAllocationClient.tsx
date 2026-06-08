@@ -724,9 +724,11 @@ export default function CjAllocationClient({
             : "CJ WMS 다운로드 가능";
   const readinessSteps = [
     {
-      label: "재고",
-      value: stockRows.length > 0 ? `${stockRows.length.toLocaleString()}개 로트` : "로드 필요",
-      tone: stockRows.length > 0 ? "ok" : "warn",
+      label: "출고창고 재고",
+      value: warehouseStock.length > 0
+        ? `${warehouseStock.length.toLocaleString()}개 로트`
+        : "선택 창고 재고 없음",
+      tone: warehouseStock.length > 0 ? "ok" : "warn",
     },
     {
       label: "파일",
@@ -757,20 +759,14 @@ export default function CjAllocationClient({
   return (
     <main className="min-h-dvh px-4 py-4 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
-        <header className="flex flex-col gap-3 border-b border-line pb-4 md:flex-row md:items-end md:justify-between">
-          <div className="min-w-0">
-            <p className="eyebrow">글로벌 SCM / CJ 출고 배정</p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
-              CJ 로트 배정
-            </h1>
-            <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">
-              업로드 요청을 검증하고 FEFO 기준으로 로트를 배정한 뒤, 다운로드 가능 여부를 바로 확인합니다.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            <StatusPill tone="brand">{outboundType}</StatusPill>
-            <StatusPill tone="brand">{depot}</StatusPill>
-          </div>
+        <header className="border-b border-line pb-4">
+          <p className="eyebrow">글로벌 SCM / CJ 출고 배정</p>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">
+            CJ 로트 배정
+          </h1>
+          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">
+            업로드 요청을 검증하고 FEFO 기준으로 로트를 배정한 뒤, 다운로드 가능 여부를 바로 확인합니다.
+          </p>
         </header>
 
         {snapshot.closeDate ? (
