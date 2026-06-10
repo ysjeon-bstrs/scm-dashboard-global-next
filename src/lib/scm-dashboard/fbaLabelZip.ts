@@ -182,10 +182,14 @@ function validateRows(rows: FbaLabelPageRow[]): string[] {
 
 async function extractPageTexts(arrayBuffer: ArrayBuffer): Promise<string[]> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc ||= new URL(
+    "pdfjs-dist/legacy/build/pdf.worker.mjs",
+    import.meta.url,
+  ).toString();
+
   const loadingTask = pdfjs.getDocument({
     data: arrayBuffer.slice(0),
-    disableWorker: true,
-  } as Parameters<typeof pdfjs.getDocument>[0] & { disableWorker: boolean });
+  });
   const pdf = await loadingTask.promise;
   const pageTexts: string[] = [];
 
