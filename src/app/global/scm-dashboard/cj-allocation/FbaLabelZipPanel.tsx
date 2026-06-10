@@ -187,8 +187,11 @@ export function FbaLabelZipPanel() {
   }
 
   function clearOrderFile() {
+    setPanelError(null);
+    setNotice(null);
     setOrderFileName(null);
     setOrderIds([]);
+    setOrderDragOver(false);
     if (orderInputRef.current) orderInputRef.current.value = "";
   }
 
@@ -235,7 +238,7 @@ export function FbaLabelZipPanel() {
     <Panel>
       <PanelHeader
         eyebrow="보조 도구"
-        meta={`${slots.length}/${MAX_FBA_LABEL_FILES} PDFs · ZIP 1개`}
+        meta={`PDF ${slots.length}/${MAX_FBA_LABEL_FILES} · ZIP 1개`}
         title="Amazon FBA 라벨 ZIP 생성"
       />
       <p className="-mt-2 mb-4 max-w-3xl text-sm leading-6 text-muted">
@@ -268,6 +271,8 @@ export function FbaLabelZipPanel() {
           ) : null}
         </div>
         <div
+          aria-label="CJ OMS 엑셀 업로드"
+          aria-busy={isReadingOrders}
           className={`cursor-pointer rounded-xl border-2 border-dashed p-3 transition ${
             orderDragOver
               ? "border-brand bg-brand-soft/50"
@@ -302,8 +307,8 @@ export function FbaLabelZipPanel() {
             ref={orderInputRef}
             type="file"
           />
-          <div className="pointer-events-none flex flex-col items-center gap-1 py-4 text-center">
-            <span className="text-sm font-medium text-ink">
+          <div className="pointer-events-none flex min-w-0 flex-col items-center gap-1 py-4 text-center">
+            <span className="max-w-full truncate text-sm font-medium text-ink">
               {isReadingOrders
                 ? "엑셀 처리 중…"
                 : orderFileName
@@ -341,6 +346,7 @@ export function FbaLabelZipPanel() {
 
               <div
                 aria-label={`FBA 라벨 PDF ${index + 1} 업로드`}
+                aria-busy={slot.isProcessing}
                 className={`cursor-pointer rounded-xl border-2 border-dashed p-3 transition ${
                   slot.dragOver
                     ? "border-brand bg-brand-soft/50"
@@ -378,8 +384,8 @@ export function FbaLabelZipPanel() {
                   }}
                   type="file"
                 />
-                <div className="pointer-events-none flex flex-col items-center gap-1 py-4 text-center">
-                  <span className="text-sm font-medium text-ink">
+                <div className="pointer-events-none flex min-w-0 flex-col items-center gap-1 py-4 text-center">
+                  <span className="max-w-full truncate text-sm font-medium text-ink">
                     {slot.isProcessing
                       ? "PDF 처리 중…"
                       : result
@@ -471,60 +477,69 @@ export function FbaLabelZipPanel() {
         </button>
       </div>
 
-      <div className={`mt-5 rounded-xl border px-4 py-3 ${
-        canDownloadCombinedZip
-          ? "border-ok/30 bg-ok-soft text-ok-ink"
-          : mismatchCount > 0 || hasPdfErrors
-            ? "border-danger/30 bg-danger-soft text-danger-ink"
-            : "border-warn/30 bg-warn-soft text-warn-ink"
-      }`}>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold">
-              {canDownloadCombinedZip ? `${zipFileName} 생성 준비 완료` : `ZIP 다운로드 대기: ${labelZipBlocker}`}
-            </p>
-            <p className="mt-1 text-xs opacity-85">
-              엑셀 주문번호와 PDF Box ID가 완전히 일치해야 ZIP을 받을 수 있습니다.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-4 lg:min-w-[500px]">
-            {labelZipReadinessSteps.map((step) => (
-              <div
-                className="rounded-lg bg-surface/80 px-3 py-2 text-ink ring-1 ring-line"
-                key={step.label}
-              >
-                <p className="field-label">{step.label}</p>
-                <div className="mt-1">
-                  <StatusPill tone={step.tone}>{step.value}</StatusPill>
-                </div>
-              </div>
-            ))}
-          </div>
+      <div className="mt-5 space-y-3">
+        <div className="flex items-center gap-2.5">
+          <span className="step-no">3</span>
+          <h3 className="text-sm font-semibold text-ink">ZIP 검증 및 다운로드</h3>
         </div>
 
-        {comparison.missingInPdf.length > 0 ? (
-          <div className="mt-3"><Banner tone="danger">엑셀에는 있지만 PDF에 없는 주문번호: {comparison.missingInPdf.slice(0, 8).join(", ")}{comparison.missingInPdf.length > 8 ? " 외" : ""}</Banner></div>
-        ) : null}
-        {comparison.extraInPdf.length > 0 ? (
-          <div className="mt-3"><Banner tone="danger">PDF에는 있지만 엑셀에 없는 Box ID: {comparison.extraInPdf.slice(0, 8).join(", ")}{comparison.extraInPdf.length > 8 ? " 외" : ""}</Banner></div>
-        ) : null}
-        {comparison.duplicateOrderIds.length > 0 ? (
-          <div className="mt-3"><Banner tone="danger">엑셀 주문번호 중복: {comparison.duplicateOrderIds.slice(0, 8).join(", ")}{comparison.duplicateOrderIds.length > 8 ? " 외" : ""}</Banner></div>
-        ) : null}
+        <div
+          className={`rounded-xl border px-4 py-3 ${
+            canDownloadCombinedZip
+              ? "border-ok/30 bg-ok-soft text-ok-ink"
+              : mismatchCount > 0 || hasPdfErrors
+                ? "border-danger/30 bg-danger-soft text-danger-ink"
+                : "border-warn/30 bg-warn-soft text-warn-ink"
+          }`}
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold">
+                {canDownloadCombinedZip ? `${zipFileName} 생성 준비 완료` : `ZIP 다운로드 대기: ${labelZipBlocker}`}
+              </p>
+              <p className="mt-1 text-xs opacity-85">
+                엑셀 주문번호와 PDF Box ID가 완전히 일치해야 ZIP을 받을 수 있습니다.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-4 lg:min-w-[500px]">
+              {labelZipReadinessSteps.map((step) => (
+                <div
+                  className="rounded-lg bg-surface/80 px-3 py-2 text-ink ring-1 ring-line"
+                  key={step.label}
+                >
+                  <p className="field-label">{step.label}</p>
+                  <div className="mt-1">
+                    <StatusPill tone={step.tone}>{step.value}</StatusPill>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-current/10 pt-3">
-          <p className="text-xs opacity-80">
-            다운로드 파일명: {zipFileName}
-          </p>
-          <button
-            className="btn btn-primary"
-            disabled={!canDownloadCombinedZip}
-            onClick={() => void downloadCombinedZip()}
-            title={!canDownloadCombinedZip ? "엑셀과 PDF 라벨 매칭을 먼저 완료해야 합니다." : undefined}
-            type="button"
-          >
-            {isBuildingZip ? "ZIP 생성 중…" : ".ZIP 다운로드"}
-          </button>
+          {comparison.missingInPdf.length > 0 ? (
+            <div className="mt-3"><Banner tone="danger">엑셀에는 있지만 PDF에 없는 주문번호: {comparison.missingInPdf.slice(0, 8).join(", ")}{comparison.missingInPdf.length > 8 ? " 외" : ""}</Banner></div>
+          ) : null}
+          {comparison.extraInPdf.length > 0 ? (
+            <div className="mt-3"><Banner tone="danger">PDF에는 있지만 엑셀에 없는 Box ID: {comparison.extraInPdf.slice(0, 8).join(", ")}{comparison.extraInPdf.length > 8 ? " 외" : ""}</Banner></div>
+          ) : null}
+          {comparison.duplicateOrderIds.length > 0 ? (
+            <div className="mt-3"><Banner tone="danger">엑셀 주문번호 중복: {comparison.duplicateOrderIds.slice(0, 8).join(", ")}{comparison.duplicateOrderIds.length > 8 ? " 외" : ""}</Banner></div>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-current/10 pt-3">
+            <p className="text-xs opacity-80">
+              다운로드 파일명: {zipFileName}
+            </p>
+            <button
+              className="btn btn-primary"
+              disabled={!canDownloadCombinedZip}
+              onClick={() => void downloadCombinedZip()}
+              title={!canDownloadCombinedZip ? "엑셀과 PDF 라벨 매칭을 먼저 완료해야 합니다." : undefined}
+              type="button"
+            >
+              {isBuildingZip ? "ZIP 생성 중…" : ".ZIP 다운로드"}
+            </button>
+          </div>
         </div>
       </div>
     </Panel>
