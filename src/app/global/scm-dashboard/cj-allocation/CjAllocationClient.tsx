@@ -1323,8 +1323,6 @@ export default function CjAllocationClient({
 
         </Panel>
 
-        {outboundType === "FBA" ? <FbaLabelZipPanel /> : null}
-
         <Panel>
           <PanelHeader
             eyebrow="배정 결과"
@@ -1375,6 +1373,8 @@ export default function CjAllocationClient({
             </div>
           ) : null}
         </Panel>
+
+        {outboundType === "FBA" ? <FbaLabelZipPanel /> : null}
       </div>
     </main>
   );
