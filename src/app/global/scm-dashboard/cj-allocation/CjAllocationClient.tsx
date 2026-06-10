@@ -41,6 +41,7 @@ import {
   Stat,
   StatusPill,
 } from "@/components/scm-dashboard/ui";
+import { FbaLabelZipPanel } from "./FbaLabelZipPanel";
 
 let modulesRegistered = false;
 
@@ -1321,6 +1322,8 @@ export default function CjAllocationClient({
           </div>
 
         </Panel>
+
+        {outboundType === "FBA" ? <FbaLabelZipPanel /> : null}
 
         <Panel>
           <PanelHeader
