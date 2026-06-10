@@ -3,7 +3,7 @@ import { join } from "node:path";
 import JSZip from "jszip";
 import {
   buildCombinedFbaLabelZip,
-  COMBINED_FBA_LABEL_ZIP_FILE_NAME,
+  COMBINED_FBA_LABEL_ZIP_FALLBACK_FILE_NAME,
   parseFbaLabelPdf,
 } from "../src/lib/scm-dashboard/fbaLabelZip.ts";
 
@@ -32,12 +32,12 @@ for (const inputPath of inputPaths) {
 const zipBlob = await buildCombinedFbaLabelZip(results);
 const arrayBuffer = await zipBlob.arrayBuffer();
 await mkdir(outDir, { recursive: true });
-const outPath = join(outDir, COMBINED_FBA_LABEL_ZIP_FILE_NAME);
+const outPath = join(outDir, COMBINED_FBA_LABEL_ZIP_FALLBACK_FILE_NAME);
 await writeFile(outPath, Buffer.from(arrayBuffer));
 const zip = await JSZip.loadAsync(arrayBuffer);
 const names = Object.keys(zip.files);
 console.log(JSON.stringify({
-  combinedZipFileName: COMBINED_FBA_LABEL_ZIP_FILE_NAME,
+  combinedZipFileName: COMBINED_FBA_LABEL_ZIP_FALLBACK_FILE_NAME,
   outPath,
   entries: names.length,
   firstEntries: names.slice(0, 3),

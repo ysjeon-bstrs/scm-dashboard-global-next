@@ -2,11 +2,12 @@ import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
 
 export const MAX_FBA_LABEL_FILES = 5;
-export const COMBINED_FBA_LABEL_ZIP_FILE_NAME = "FBCL.zip";
+export const COMBINED_FBA_LABEL_ZIP_FALLBACK_FILE_NAME = "FBCL.zip";
 export const CJ_OMS_ORDER_ID_COLUMN = "주문번호";
 export const FBA_BOX_ID_REGEX = /\bFBA[A-Z0-9]{8,}U\d{6}\b/g;
 const FBA_BOX_SEQUENCE_REGEX = /U(\d{6})$/;
 const PDF_EXTENSION_REGEX = /\.pdf$/i;
+const EXCEL_EXTENSION_REGEX = /\.(xlsx|xls)$/i;
 
 type XlsxModule = typeof import("xlsx");
 
@@ -56,6 +57,13 @@ interface PdfTextItem {
 
 export function extractFbaBoxIdsFromText(text: string): string[] {
   return Array.from(new Set(text.match(FBA_BOX_ID_REGEX) ?? []));
+}
+
+export function getCombinedFbaLabelZipFileName(orderFileName: string | null): string {
+  const trimmed = orderFileName?.trim();
+  if (!trimmed) return COMBINED_FBA_LABEL_ZIP_FALLBACK_FILE_NAME;
+  const baseName = trimmed.replace(EXCEL_EXTENSION_REGEX, "");
+  return `${baseName}.zip`;
 }
 
 export function getFbaPrefix(boxId: string): string {

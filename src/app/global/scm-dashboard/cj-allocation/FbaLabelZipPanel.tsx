@@ -5,9 +5,9 @@ import { useMemo, useRef, useState } from "react";
 import { Banner, Panel, PanelHeader, Stat, StatusPill } from "@/components/scm-dashboard/ui";
 import {
   buildCombinedFbaLabelZip,
-  COMBINED_FBA_LABEL_ZIP_FILE_NAME,
   compareCjOmsOrderIdsWithPdfBoxIds,
   findCrossPdfDuplicateBoxIds,
+  getCombinedFbaLabelZipFileName,
   MAX_FBA_LABEL_FILES,
   parseFbaLabelPdf,
   readCjOmsOrderIdsFromWorkbook,
@@ -80,6 +80,10 @@ export function FbaLabelZipPanel() {
   const comparison = useMemo(
     () => compareCjOmsOrderIdsWithPdfBoxIds(orderIds, pdfBoxIds),
     [orderIds, pdfBoxIds],
+  );
+  const zipFileName = useMemo(
+    () => getCombinedFbaLabelZipFileName(orderFileName),
+    [orderFileName],
   );
 
   const canAddSlot = slots.length < MAX_FBA_LABEL_FILES;
@@ -174,8 +178,8 @@ export function FbaLabelZipPanel() {
     setPanelError(null);
     try {
       const blob = await buildCombinedFbaLabelZip(results);
-      downloadBlob(blob, COMBINED_FBA_LABEL_ZIP_FILE_NAME);
-      setNotice(`${COMBINED_FBA_LABEL_ZIP_FILE_NAME}: ${pdfBoxIds.length.toLocaleString()}개 라벨 PDF 생성 완료`);
+      downloadBlob(blob, zipFileName);
+      setNotice(`${zipFileName}: ${pdfBoxIds.length.toLocaleString()}개 라벨 PDF 생성 완료`);
     } catch (error) {
       setPanelError(error instanceof Error ? error.message : "통합 ZIP 생성 중 오류가 발생했습니다.");
     } finally {
@@ -193,7 +197,7 @@ export function FbaLabelZipPanel() {
       <p className="-mt-2 mb-4 max-w-3xl text-sm leading-6 text-muted">
         CJ OMS 엑셀 1개와 Amazon 센터별 FBA 라벨 PDF 최대 5개를 함께 업로드하세요.
         PDF를 낱장으로 분리한 뒤, 엑셀의 주문번호와 PDF Box ID가 1:1로 일치할 때만
-        폴더 없는 통합 {COMBINED_FBA_LABEL_ZIP_FILE_NAME}을 생성합니다.
+        엑셀 파일명과 같은 이름의 ZIP을 생성합니다.
       </p>
 
       {notice ? <div className="mb-3"><Banner tone="ok">{notice}</Banner></div> : null}
@@ -411,7 +415,7 @@ export function FbaLabelZipPanel() {
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
         <p className="text-xs text-faint">
-          PDF는 최대 5개까지 업로드할 수 있고, 모든 낱장 PDF는 {COMBINED_FBA_LABEL_ZIP_FILE_NAME} 루트에 평면 구조로 들어갑니다.
+          PDF는 최대 5개까지 업로드할 수 있고, 모든 낱장 PDF는 {zipFileName} 루트에 평면 구조로 들어갑니다.
         </p>
         <button
           className="btn btn-secondary"
@@ -461,7 +465,7 @@ export function FbaLabelZipPanel() {
             title={!canDownloadCombinedZip ? "엑셀과 PDF 라벨 매칭을 먼저 완료해야 합니다." : undefined}
             type="button"
           >
-            {isBuildingZip ? "ZIP 생성 중…" : `${COMBINED_FBA_LABEL_ZIP_FILE_NAME} 다운로드`}
+            {isBuildingZip ? "ZIP 생성 중…" : `${zipFileName} 다운로드`}
           </button>
         </div>
       </div>

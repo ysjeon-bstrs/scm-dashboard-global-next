@@ -9,6 +9,7 @@ import {
   extractCjOmsOrderIdsFromRows,
   extractFbaBoxIdsFromText,
   findCrossPdfDuplicateBoxIds,
+  getCombinedFbaLabelZipFileName,
   hasSequentialFbaBoxIds,
   type FbaLabelParseResult,
 } from "../src/lib/scm-dashboard/fbaLabelZip.ts";
@@ -106,7 +107,13 @@ test("compares strict CJ OMS order IDs with PDF box IDs", () => {
   assert.deepEqual(comparison.extraInPdf, ["FBA19DZ41HYBU000001"]);
 });
 
-test("builds one flat FBCL.zip from multiple PDF parse results", async () => {
+test("derives the combined ZIP file name from uploaded CJ OMS Excel", () => {
+  assert.equal(getCombinedFbaLabelZipFileName("cj_oms_upload_test.xlsx"), "cj_oms_upload_test.zip");
+  assert.equal(getCombinedFbaLabelZipFileName("cj_oms_upload_test.xls"), "cj_oms_upload_test.zip");
+  assert.equal(getCombinedFbaLabelZipFileName(null), "FBCL.zip");
+});
+
+test("builds one flat ZIP from multiple PDF parse results", async () => {
   const zipBlob = await buildCombinedFbaLabelZip([
     fakeResult("slot-1", ["FBA19DZ63LQ0U000001", "FBA19DZ63LQ0U000002"]),
     fakeResult("slot-2", ["FBA19DZ41HYBU000001"]),
