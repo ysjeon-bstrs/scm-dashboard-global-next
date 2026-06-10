@@ -61,6 +61,7 @@ export function FbaLabelZipPanel() {
   const [orderFileName, setOrderFileName] = useState<string | null>(null);
   const [orderIds, setOrderIds] = useState<string[]>([]);
   const [isReadingOrders, setIsReadingOrders] = useState(false);
+  const [orderDragOver, setOrderDragOver] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
   const [isBuildingZip, setIsBuildingZip] = useState(false);
@@ -219,9 +220,23 @@ export function FbaLabelZipPanel() {
           ) : null}
         </div>
         <div
-          className="cursor-pointer rounded-xl border-2 border-dashed border-line bg-surface p-3 transition hover:border-line-strong"
+          className={`cursor-pointer rounded-xl border-2 border-dashed p-3 transition ${
+            orderDragOver
+              ? "border-brand bg-brand-soft/50"
+              : "border-line bg-surface hover:border-line-strong"
+          }`}
           onClick={(event) => {
             if (event.target !== orderInputRef.current) orderInputRef.current?.click();
+          }}
+          onDragLeave={() => setOrderDragOver(false)}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setOrderDragOver(true);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setOrderDragOver(false);
+            void handleOrderFile(event.dataTransfer.files?.[0] ?? null);
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
