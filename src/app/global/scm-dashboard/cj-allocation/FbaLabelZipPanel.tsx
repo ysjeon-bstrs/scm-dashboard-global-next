@@ -167,6 +167,21 @@ export function FbaLabelZipPanel() {
     delete inputRefs.current[slotId];
   }
 
+  function openOrderFileDialog() {
+    if (orderInputRef.current) {
+      orderInputRef.current.value = "";
+      orderInputRef.current.click();
+    }
+  }
+
+  function openPdfFileDialog(slotId: string) {
+    const input = inputRefs.current[slotId];
+    if (input) {
+      input.value = "";
+      input.click();
+    }
+  }
+
   async function handleOrderFile(file: File | null) {
     if (!file) return;
     setPanelError(null);
@@ -279,7 +294,7 @@ export function FbaLabelZipPanel() {
               : "border-line bg-surface hover:border-line-strong"
           }`}
           onClick={(event) => {
-            if (event.target !== orderInputRef.current) orderInputRef.current?.click();
+            if (event.target !== orderInputRef.current) openOrderFileDialog();
           }}
           onDragLeave={() => setOrderDragOver(false)}
           onDragOver={(event) => {
@@ -294,7 +309,7 @@ export function FbaLabelZipPanel() {
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              orderInputRef.current?.click();
+              openOrderFileDialog();
             }
           }}
           role="button"
@@ -354,7 +369,7 @@ export function FbaLabelZipPanel() {
                 }`}
                 onClick={(event) => {
                   if (event.target !== inputRefs.current[slot.id]) {
-                    inputRefs.current[slot.id]?.click();
+                    openPdfFileDialog(slot.id);
                   }
                 }}
                 onDragLeave={() => updateSlot(slot.id, { dragOver: false })}
@@ -369,7 +384,7 @@ export function FbaLabelZipPanel() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    inputRefs.current[slot.id]?.click();
+                    openPdfFileDialog(slot.id);
                   }
                 }}
                 role="button"
@@ -409,8 +424,8 @@ export function FbaLabelZipPanel() {
                     <div>
                       <p className="field-label">상태</p>
                       <div className="mt-2">
-                        <StatusPill tone={resultHasBlockingErrors(result, duplicateIds) ? "danger" : "ok"}>
-                          {resultHasBlockingErrors(result, duplicateIds) ? "확인 필요" : "정상"}
+                        <StatusPill tone={resultHasBlockingErrors(result, duplicateIds) ? "danger" : result.warnings.length > 0 ? "warn" : "ok"}>
+                          {resultHasBlockingErrors(result, duplicateIds) ? "확인 필요" : result.warnings.length > 0 ? "확인 권장" : "정상"}
                         </StatusPill>
                       </div>
                     </div>
@@ -422,6 +437,12 @@ export function FbaLabelZipPanel() {
                       {result.errors.length > 4 ? " 외" : ""}
                     </Banner>
                   ) : null}
+                  {result.warnings.length > 0 ? (
+                    <Banner tone="warn">
+                      {result.warnings.slice(0, 4).join(" / ")}
+                      {result.warnings.length > 4 ? " 외" : ""}
+                    </Banner>
+                  ) : null}
                   {affectedDuplicates.length > 0 ? (
                     <Banner tone="danger">
                       다른 PDF와 중복된 Box ID: {affectedDuplicates.slice(0, 6).join(", ")}
@@ -429,8 +450,8 @@ export function FbaLabelZipPanel() {
                     </Banner>
                   ) : null}
 
-                  <div className="overflow-hidden rounded-xl border border-line">
-                    <table className="w-full text-left text-xs">
+                  <div className="overflow-x-auto rounded-xl border border-line">
+                    <table className="min-w-[480px] w-full text-left text-xs">
                       <thead className="bg-sunken text-faint">
                         <tr>
                           <th className="px-3 py-2 font-medium">페이지</th>

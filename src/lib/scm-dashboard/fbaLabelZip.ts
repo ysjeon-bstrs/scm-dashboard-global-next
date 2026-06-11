@@ -5,6 +5,7 @@ export const MAX_FBA_LABEL_FILES = 5;
 export const COMBINED_FBA_LABEL_ZIP_FALLBACK_FILE_NAME = "FBCL.zip";
 export const CJ_OMS_ORDER_ID_COLUMN = "주문번호";
 export const FBA_BOX_ID_REGEX = /\bFBA[A-Z0-9]{8,}U\d{6}\b/g;
+const FBA_BOX_ID_EXACT_REGEX = /^FBA[A-Z0-9]{8,}U\d{6}$/;
 const FBA_BOX_SEQUENCE_REGEX = /U(\d{6})$/;
 const PDF_EXTENSION_REGEX = /\.pdf$/i;
 const EXCEL_EXTENSION_REGEX = /\.(xlsx|xls)$/i;
@@ -53,6 +54,7 @@ export interface FbaOrderComparison {
 
 interface PdfTextItem {
   str?: string;
+  hasEOL?: boolean;
 }
 
 export function extractFbaBoxIdsFromText(text: string): string[] {
@@ -94,13 +96,11 @@ export function extractCjOmsOrderIdsFromRows(rows: Record<string, unknown>[]): s
     const raw = row[CJ_OMS_ORDER_ID_COLUMN];
     if (raw == null || raw === "") return;
     const orderId = String(raw).trim();
-    if (!FBA_BOX_ID_REGEX.test(orderId)) {
-      FBA_BOX_ID_REGEX.lastIndex = 0;
-      throw new Error(`${index + 2}행 주문번호 형식이 올바르지 않습니다: ${orderId}`);
-    }
-    FBA_BOX_ID_REGEX.lastIndex = 0;
     if (orderId.includes(".pdf")) {
       throw new Error(`${index + 2}행 주문번호에 .pdf가 포함되어 있습니다: ${orderId}`);
+    }
+    if (!FBA_BOX_ID_EXACT_REGEX.test(orderId)) {
+      throw new Error(`${index + 2}행 주문번호 형식이 올바르지 않습니다: ${orderId}`);
     }
     ids.push(orderId);
   });
@@ -163,8 +163,9 @@ function isPdfFile(file: File): boolean {
   return file.type === "application/pdf" || PDF_EXTENSION_REGEX.test(file.name);
 }
 
-function validateRows(rows: FbaLabelPageRow[]): string[] {
+function validateRows(rows: FbaLabelPageRow[]): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
+  const warnings: string[] = [];
   const boxIds = rows.map((row) => row.boxId).filter((id): id is string => Boolean(id));
 
   if (boxIds.length !== rows.length) {
@@ -181,11 +182,11 @@ function validateRows(rows: FbaLabelPageRow[]): string[] {
     if (prefixes.size > 1) {
       errors.push(`한 PDF 안에 여러 FBA prefix가 감지되었습니다: ${Array.from(prefixes).join(", ")}`);
     } else if (!hasSequentialFbaBoxIds(boxIds)) {
-      errors.push("Box ID 연번이 페이지 순서와 일치하지 않습니다.");
+      warnings.push("Box ID 연번이 1부터 연속되지는 않습니다. 부분 재출력이나 분할 PDF라면 정상일 수 있습니다.");
     }
   }
 
-  return errors;
+  return { errors, warnings };
 }
 
 async function extractPageTexts(arrayBuffer: ArrayBuffer): Promise<string[]> {
@@ -204,10 +205,15 @@ async function extractPageTexts(arrayBuffer: ArrayBuffer): Promise<string[]> {
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
-    const text = content.items
-      .map((item) => ("str" in item ? (item as PdfTextItem).str ?? "" : ""))
-      .join(" ");
-    pageTexts.push(text);
+    const parts: string[] = [];
+    for (const item of content.items) {
+      if (!("str" in item)) continue;
+      const textItem = item as PdfTextItem;
+      parts.push(textItem.str ?? "");
+      if (textItem.hasEOL) parts.push("\n");
+    }
+    pageTexts.push(parts.join(""));
+    page.cleanup();
   }
 
   await (pdf as typeof pdf & { destroy?: () => Promise<void> }).destroy?.();
@@ -263,9 +269,9 @@ export async function parseFbaLabelPdf(
     };
   });
 
-  const validationErrors = validateRows(rows);
-  if (validationErrors.length > 0) {
-    return { ...baseResult, pageCount, rows, errors: validationErrors };
+  const validation = validateRows(rows);
+  if (validation.errors.length > 0) {
+    return { ...baseResult, pageCount, rows, errors: validation.errors, warnings: validation.warnings };
   }
 
   const pageFiles: FbaLabelPageFile[] = [];
@@ -279,7 +285,7 @@ export async function parseFbaLabelPdf(
     pageFiles.push({ boxId: row.boxId, bytes: pageBytes });
   }
 
-  return { ...baseResult, pageCount, rows, pageFiles };
+  return { ...baseResult, pageCount, rows, pageFiles, warnings: validation.warnings };
 }
 
 // Backward-compatible alias for earlier implementation/tests.

@@ -68,6 +68,18 @@ test("does not normalize malformed order IDs with .pdf suffix", () => {
   );
 });
 
+test("rejects order IDs unless the full cell is exactly one Box ID", () => {
+  assert.throws(
+    () => extractCjOmsOrderIdsFromRows([{ 주문번호: "prefix-FBA19219ZXCOU000001" }]),
+    /주문번호 형식이 올바르지 않습니다/,
+  );
+
+  assert.throws(
+    () => extractCjOmsOrderIdsFromRows([{ 주문번호: "FBA19219ZXCOU000001-extra" }]),
+    /주문번호 형식이 올바르지 않습니다/,
+  );
+});
+
 test("detects sequential FBA box IDs in page order", () => {
   assert.equal(
     hasSequentialFbaBoxIds([
