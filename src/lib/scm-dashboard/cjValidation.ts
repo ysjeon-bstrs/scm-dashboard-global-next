@@ -177,7 +177,12 @@ export function parseFbaRows(
   const rows: FbaShipmentRow[] = [];
   rawRows.forEach((rawRow, index) => {
     const r = mapColumns(rawRow);
-    const shipment = str(r, "shipment_id");
+    // Some Amazon/CJ order templates leave `FBA Shipment ID` blank and carry
+    // the operational shipment key only in `Reference Number` (for example
+    // MV..._FC rows with C0001-C0104 carton ranges). Treat Reference Number as
+    // the shipment grouping key in that case instead of dropping the row.
+    const referenceNumber = str(r, "reference_number");
+    const shipment = str(r, "shipment_id") || referenceNumber;
     const sku = str(r, "sku");
     if (!shipment || !sku) return; // skip blank rows
 
@@ -199,7 +204,7 @@ export function parseFbaRows(
 
     rows.push({
       rowNumber: index + 2,
-      reference_number: str(r, "reference_number"),
+      reference_number: referenceNumber,
       shipment_id: shipment,
       fc: str(r, "fc"),
       address: str(r, "address"),
