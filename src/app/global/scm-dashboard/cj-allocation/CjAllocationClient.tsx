@@ -91,11 +91,11 @@ function downloadCjWmsWorkbook(
   allocations: LotAllocation[],
   rows: FbaShipmentRow[],
 ) {
-  const wmsRows = buildCjWmsRows(allocations, rows);
+  const d = new Date();
+  const wmsRows = buildCjWmsRows(allocations, rows, d);
   const worksheet = XLSX.utils.json_to_sheet(wmsRows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "CJOM주문양식");
-  const d = new Date();
   const ts =
     `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}` +
     `${String(d.getDate()).padStart(2, "0")}${String(d.getHours()).padStart(2, "0")}` +

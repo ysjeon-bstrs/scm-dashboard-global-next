@@ -4,6 +4,7 @@ import { PDFDocument } from "pdf-lib";
 export const MAX_FBA_LABEL_FILES = 5;
 export const COMBINED_FBA_LABEL_ZIP_FALLBACK_FILE_NAME = "FBCL.zip";
 export const CJ_OMS_ORDER_ID_COLUMN = "주문번호";
+export const CJ_OMS_FBA_PDF_COLUMN = "FBA";
 export const FBA_BOX_ID_REGEX = /\bFBA[A-Z0-9]{8,}U\d{6}\b/g;
 const FBA_BOX_ID_EXACT_REGEX = /^FBA[A-Z0-9]{8,}U\d{6}$/;
 const FBA_BOX_SEQUENCE_REGEX = /U(\d{6})$/;
@@ -91,18 +92,37 @@ export function extractCjOmsOrderIdsFromRows(rows: Record<string, unknown>[]): s
     throw new Error(`${CJ_OMS_ORDER_ID_COLUMN} 컬럼이 없습니다.`);
   }
 
+  const hasFbaPdfColumn = Object.prototype.hasOwnProperty.call(rows[0], CJ_OMS_FBA_PDF_COLUMN);
+
   const ids: string[] = [];
   rows.forEach((row, index) => {
-    const raw = row[CJ_OMS_ORDER_ID_COLUMN];
-    if (raw == null || raw === "") return;
-    const orderId = String(raw).trim();
+    const rawOrderId = row[CJ_OMS_ORDER_ID_COLUMN];
+    if (rawOrderId == null || rawOrderId === "") return;
+    const orderId = String(rawOrderId).trim();
     if (orderId.includes(".pdf")) {
       throw new Error(`${index + 2}행 주문번호에 .pdf가 포함되어 있습니다: ${orderId}`);
     }
     if (!FBA_BOX_ID_EXACT_REGEX.test(orderId)) {
       throw new Error(`${index + 2}행 주문번호 형식이 올바르지 않습니다: ${orderId}`);
     }
-    ids.push(orderId);
+
+    if (hasFbaPdfColumn) {
+      const rawFba = row[CJ_OMS_FBA_PDF_COLUMN];
+      const fbaFileName = rawFba == null ? "" : String(rawFba).trim();
+      if (!fbaFileName) {
+        throw new Error(`${index + 2}행 FBA 컬럼이 비어 있습니다.`);
+      }
+      if (!PDF_EXTENSION_REGEX.test(fbaFileName)) {
+        throw new Error(`${index + 2}행 FBA 컬럼은 .pdf 파일명이어야 합니다: ${fbaFileName}`);
+      }
+      const boxIdFromFba = fbaFileName.replace(PDF_EXTENSION_REGEX, "");
+      if (boxIdFromFba !== orderId) {
+        throw new Error(`${index + 2}행 주문번호와 FBA 파일명이 일치하지 않습니다: ${orderId} / ${fbaFileName}`);
+      }
+      ids.push(boxIdFromFba);
+    } else {
+      ids.push(orderId);
+    }
   });
 
   return ids;

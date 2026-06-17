@@ -367,6 +367,15 @@ export interface CjWmsRow {
   도착국가: string;
   "Validation Key": string;
   Units: number;
+  FBA: string;
+  주문일시: string;
+}
+
+export function formatCjOmsOrderDate(date: Date = new Date()): string {
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const year = String(date.getFullYear()).slice(2);
+  return `${month}/${day}/${year}`;
 }
 
 const INVALID = new Set(["", "nan", "none", "null"]);
@@ -374,6 +383,7 @@ const INVALID = new Set(["", "nan", "none", "null"]);
 export function buildCjWmsRows(
   allocations: LotAllocation[],
   rows: FbaShipmentRow[],
+  orderDate: Date = new Date(),
 ): CjWmsRow[] {
   const shipInfo = new Map<string, FbaShipmentRow>();
   for (const row of rows) {
@@ -385,6 +395,7 @@ export function buildCjWmsRows(
 
   const out: CjWmsRow[] = [];
   let counter = 0;
+  const orderDateText = formatCjOmsOrderDate(orderDate);
 
   const orderNo = (row: FbaShipmentRow, box: number) => {
     if (row.fulfillment_type === "FBT") {
@@ -429,6 +440,8 @@ export function buildCjWmsRows(
         도착국가: "US",
         "Validation Key": validationKey,
         Units: qty,
+        FBA: `${no}.pdf`,
+        주문일시: orderDateText,
       };
       counter += 1;
       return r;

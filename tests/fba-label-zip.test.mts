@@ -68,6 +68,29 @@ test("does not normalize malformed order IDs with .pdf suffix", () => {
   );
 });
 
+test("extracts CJ OMS order IDs from new FBA .pdf column and validates the file name", () => {
+  assert.deepEqual(
+    extractCjOmsOrderIdsFromRows([
+      {
+        주문번호: "FBA19219ZXCOU000001",
+        FBA: "FBA19219ZXCOU000001.pdf",
+        주문일시: "6/16/26",
+      },
+      {
+        주문번호: "FBA19219ZXCOU000002",
+        FBA: "FBA19219ZXCOU000002.pdf",
+        주문일시: "6/16/26",
+      },
+    ]),
+    ["FBA19219ZXCOU000001", "FBA19219ZXCOU000002"],
+  );
+
+  assert.throws(
+    () => extractCjOmsOrderIdsFromRows([{ 주문번호: "FBA19219ZXCOU000001", FBA: "FBA19219ZXCOU000002.pdf" }]),
+    /주문번호와 FBA 파일명이 일치하지 않습니다/,
+  );
+});
+
 test("rejects order IDs unless the full cell is exactly one Box ID", () => {
   assert.throws(
     () => extractCjOmsOrderIdsFromRows([{ 주문번호: "prefix-FBA19219ZXCOU000001" }]),

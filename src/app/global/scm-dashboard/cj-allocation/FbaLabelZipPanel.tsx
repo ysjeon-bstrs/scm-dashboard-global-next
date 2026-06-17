@@ -277,7 +277,7 @@ export function FbaLabelZipPanel() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-ink">1. CJ OMS 엑셀 업로드</p>
-            <p className="mt-1 text-xs text-faint">A열 주문번호 컬럼을 기준으로 검증합니다.</p>
+            <p className="mt-1 text-xs text-faint">주문번호와 FBA(.pdf) 컬럼을 기준으로 PDF Box ID를 검증합니다.</p>
           </div>
           {orderFileName ? (
             <button className="btn btn-ghost" onClick={clearOrderFile} type="button">
