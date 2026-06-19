@@ -5,8 +5,8 @@
  * within that SKU+expiry's lots (lot order), fill full boxes, then combine
  * sub-box remainders of the same expiry into mixed boxes.
  */
-import type { CjLotStockRow } from "./cjTypes";
-import { normalizeExpiry, type FbaShipmentRow } from "./cjValidation";
+import type { CjLotStockRow } from "./cjTypes.ts";
+import { normalizeExpiry, type FbaShipmentRow } from "./cjValidation.ts";
 
 export const DEFAULT_CJ_SALES_UNIT_PRICE = 10000;
 

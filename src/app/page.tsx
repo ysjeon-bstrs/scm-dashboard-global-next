@@ -12,12 +12,26 @@ export default function Home() {
           Streamlit 기반 SCM Dashboard를 Next.js, Supabase, AG Grid로 이식하기
           위한 개인 검증 앱입니다.
         </p>
-        <Link
-          className="mt-6 inline-flex min-h-9 items-center justify-center rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
-          href="/global/scm-dashboard"
-        >
-          Dashboard 열기
-        </Link>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Link
+            className="inline-flex min-h-9 items-center justify-center rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+            href="/global/scm-dashboard"
+          >
+            Dashboard 열기
+          </Link>
+          <Link
+            className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            href="/global/domestic-stock"
+          >
+            디자인KR 재고 열기
+          </Link>
+          <Link
+            className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            href="/global/logistics-settlement/ocean"
+          >
+            해상 정산 분석
+          </Link>
+        </div>
       </section>
     </main>
   );
