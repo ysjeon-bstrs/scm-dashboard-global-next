@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -14,9 +15,10 @@ import {
 } from "@/components/scm-dashboard/ui";
 import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
 import type {
-  OceanAllocationListRow,
+  LogisticsSettlementSummary,
+  MonthlySkuCostRow,
   OceanSettlementLineRow,
-  OceanSettlementSummary,
+  ShipmentAnalysisRow,
 } from "@/lib/scm-dashboard/logisticsSettlement/queries";
 import type { UserSummary } from "@/lib/scm-dashboard/types";
 
@@ -25,29 +27,30 @@ type OceanSettlementClientProps = {
   initialAuthError: "unauthenticated" | "forbidden-domain" | null;
 };
 
-type BlDrilldown = {
-  allocations: OceanAllocationListRow[];
-  settlementLines: OceanSettlementLineRow[];
-};
+type TabKey = "analysis" | "ocean-source" | "monthly";
 
-const emptySummary: OceanSettlementSummary = {
+const emptySummary: LogisticsSettlementSummary = {
   meta: {
     generatedAt: "",
-    settlementMonth: null,
     rowCount: 0,
-    blCount: 0,
-    invoiceCount: 0,
+    analyzedRowCount: 0,
+    pendingRowCount: 0,
+    analyzedEa: 0,
+    totalEa: 0,
+    modes: [],
   },
   totals: {
     qtyEa: 0,
     qtyCtn: 0,
+    analyzedQtyEa: 0,
     freightKrw: 0,
     dutyKrw: 0,
     otherKrw: 0,
     logisticsKrw: 0,
   },
   rows: [],
-  exceptions: [],
+  oceanSettlementRows: [],
+  monthlyRows: [],
 };
 
 function formatNumber(value: number | null | undefined) {
@@ -73,19 +76,24 @@ function formatUnit(value: number | null | undefined) {
   return Number(value ?? 0).toLocaleString("ko-KR", { maximumFractionDigits: 1 });
 }
 
-function uniqueSorted(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => b.localeCompare(a));
+function uniqueSorted(values: string[], direction: "asc" | "desc" = "asc") {
+  const out = Array.from(new Set(values.filter(Boolean)));
+  return out.sort((a, b) => direction === "desc" ? b.localeCompare(a) : a.localeCompare(b));
 }
 
-function allocatedFreight(row: OceanAllocationListRow) {
+function monthOf(date: string | null) {
+  return date ? date.slice(0, 7) : "";
+}
+
+function allocatedFreight(row: ShipmentAnalysisRow) {
   return row.skuFreightUnitKrw * row.qtyEa;
 }
 
-function allocatedDuty(row: OceanAllocationListRow) {
+function allocatedDuty(row: ShipmentAnalysisRow) {
   return row.skuDutyUnitKrw * row.qtyEa;
 }
 
-function allocatedOther(row: OceanAllocationListRow) {
+function allocatedOther(row: ShipmentAnalysisRow) {
   return row.skuOtherUnitKrw * row.qtyEa;
 }
 
@@ -93,21 +101,20 @@ export default function OceanSettlementClient({
   user,
   initialAuthError,
 }: OceanSettlementClientProps) {
-  const [summary, setSummary] = useState<OceanSettlementSummary>(emptySummary);
-  const [month, setMonth] = useState("");
+  const [summary, setSummary] = useState<LogisticsSettlementSummary>(emptySummary);
+  const [activeTab, setActiveTab] = useState<TabKey>("analysis");
+  const [shipMonth, setShipMonth] = useState("");
+  const [settlementMonth, setSettlementMonth] = useState("");
+  const [modeFilter, setModeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | "analyzed" | "pending">("");
   const [blFilter, setBlFilter] = useState("");
-  const [containerFilter, setContainerFilter] = useState("");
-  const [dutyFilter, setDutyFilter] = useState<"" | "with-duty" | "without-duty">("");
   const [query, setQuery] = useState("");
-  const [selectedBlNo, setSelectedBlNo] = useState<string | null>(null);
-  const [drilldown, setDrilldown] = useState<BlDrilldown | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const authMessage = useMemo(() => {
     if (initialAuthError === "forbidden-domain") return "boosters.kr Google 계정만 접근할 수 있습니다.";
-    if (initialAuthError === "unauthenticated") return "해상 정산 분석을 보려면 boosters.kr Google 계정으로 로그인하세요.";
+    if (initialAuthError === "unauthenticated") return "글로벌 정산 분석을 보려면 boosters.kr Google 계정으로 로그인하세요.";
     return null;
   }, [initialAuthError]);
 
@@ -116,11 +123,10 @@ export default function OceanSettlementClient({
     setIsLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ limit: "2000" });
-      const response = await fetch(`/api/logistics-settlement/ocean/summary?${params.toString()}`);
+      const response = await fetch("/api/logistics-settlement/summary?limit=5000", { cache: "no-store" });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "해상 정산 데이터를 불러오지 못했습니다.");
-      setSummary(payload as OceanSettlementSummary);
+      if (!response.ok) throw new Error(payload.error ?? "정산 분석 데이터를 불러오지 못했습니다.");
+      setSummary(payload as LogisticsSettlementSummary);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setSummary(emptySummary);
@@ -135,83 +141,96 @@ export default function OceanSettlementClient({
     void loadSummary();
   }, [loadSummary]);
 
-  const monthOptions = useMemo(
-    () => uniqueSorted(summary.rows.map((row) => row.settlementMonth)),
+  const shipMonthOptions = useMemo(
+    () => uniqueSorted(summary.rows.map((row) => monthOf(row.shipDate)), "desc"),
+    [summary.rows],
+  );
+  const settlementMonthOptions = useMemo(
+    () => uniqueSorted(summary.rows.map((row) => row.settlementMonth), "desc"),
+    [summary.rows],
+  );
+  const modeOptions = useMemo(
+    () => uniqueSorted(summary.rows.map((row) => row.carrierMode)),
     [summary.rows],
   );
   const blOptions = useMemo(
-    () => uniqueSorted(summary.rows.map((row) => row.blNo)),
-    [summary.rows],
-  );
-  const containerOptions = useMemo(
-    () => uniqueSorted(summary.rows.map((row) => row.containerType || "미지정")),
+    () => uniqueSorted(summary.rows.map((row) => row.blNo), "desc"),
     [summary.rows],
   );
 
   const filteredRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return summary.rows.filter((row) => {
-      if (month && row.settlementMonth !== month) return false;
+      if (shipMonth && monthOf(row.shipDate) !== shipMonth) return false;
+      if (settlementMonth && row.settlementMonth !== settlementMonth) return false;
+      if (modeFilter && row.carrierMode !== modeFilter) return false;
+      if (statusFilter && row.analysisStatus !== statusFilter) return false;
       if (blFilter && row.blNo !== blFilter) return false;
-      const container = row.containerType || "미지정";
-      if (containerFilter && container !== containerFilter) return false;
-      if (dutyFilter === "with-duty" && row.skuDutyUnitKrw <= 0) return false;
-      if (dutyFilter === "without-duty" && row.skuDutyUnitKrw > 0) return false;
       if (!needle) return true;
-      return [row.blNo, row.invoiceNo, row.resourceCode, row.resourceName, row.containerType]
+      return [row.invoiceNo, row.blNo, row.carrier, row.carrierMode, row.resourceCode, row.resourceName, row.fromWarehouse, row.toWarehouse]
         .join(" ")
         .toLowerCase()
         .includes(needle);
     });
-  }, [blFilter, containerFilter, dutyFilter, month, query, summary.rows]);
+  }, [blFilter, modeFilter, query, settlementMonth, shipMonth, statusFilter, summary.rows]);
 
   const filteredStats = useMemo(() => {
-    const blCount = new Set(filteredRows.map((row) => row.blNo).filter(Boolean)).size;
-    const invoiceCount = new Set(filteredRows.map((row) => row.invoiceNo).filter(Boolean)).size;
+    const analyzedRows = filteredRows.filter((row) => row.analysisStatus === "analyzed");
     const qtyEa = filteredRows.reduce((sum, row) => sum + row.qtyEa, 0);
-    const qtyCtn = filteredRows.reduce((sum, row) => sum + row.qtyCtn, 0);
-    const freightKrw = filteredRows.reduce((sum, row) => sum + allocatedFreight(row), 0);
-    const dutyKrw = filteredRows.reduce((sum, row) => sum + allocatedDuty(row), 0);
-    const otherKrw = filteredRows.reduce((sum, row) => sum + allocatedOther(row), 0);
-    const logisticsKrw = filteredRows.reduce((sum, row) => sum + row.skuLogisticsAllocKrw, 0);
+    const analyzedQtyEa = analyzedRows.reduce((sum, row) => sum + row.qtyEa, 0);
+    const logisticsKrw = analyzedRows.reduce((sum, row) => sum + row.skuLogisticsAllocKrw, 0);
     return {
-      blCount,
-      invoiceCount,
+      rowCount: filteredRows.length,
+      analyzedRowCount: analyzedRows.length,
+      pendingRowCount: filteredRows.length - analyzedRows.length,
       qtyEa,
-      qtyCtn,
-      freightKrw,
-      dutyKrw,
-      otherKrw,
+      qtyCtn: filteredRows.reduce((sum, row) => sum + row.qtyCtn, 0),
+      analyzedQtyEa,
+      analyzedRate: filteredRows.length ? analyzedRows.length / filteredRows.length : 0,
+      freightKrw: analyzedRows.reduce((sum, row) => sum + allocatedFreight(row), 0),
+      dutyKrw: analyzedRows.reduce((sum, row) => sum + allocatedDuty(row), 0),
+      otherKrw: analyzedRows.reduce((sum, row) => sum + allocatedOther(row), 0),
       logisticsKrw,
-      avgLogisticsUnitKrw: qtyEa > 0 ? logisticsKrw / qtyEa : 0,
+      avgLogisticsUnitKrw: analyzedQtyEa > 0 ? logisticsKrw / analyzedQtyEa : 0,
     };
   }, [filteredRows]);
 
-  const hasActiveFilters = Boolean(month || blFilter || containerFilter || dutyFilter || query.trim());
+  const filteredOceanRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return summary.oceanSettlementRows.filter((row) => {
+      if (blFilter && row.blNo !== blFilter) return false;
+      if (settlementMonth && !String(row.invoiceDate ?? "").startsWith(settlementMonth)) return false;
+      if (!needle) return true;
+      return [row.blNo, row.chargeType, row.country, row.containerType, row.fileName]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [blFilter, query, settlementMonth, summary.oceanSettlementRows]);
+
+  const filteredMonthlyRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return summary.monthlyRows.filter((row) => {
+      if (settlementMonth && row.month !== settlementMonth) return false;
+      if (modeFilter && row.carrierMode !== modeFilter) return false;
+      if (!needle) return true;
+      return [row.month, row.carrierMode, row.resourceCode, row.resourceName]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [modeFilter, query, settlementMonth, summary.monthlyRows]);
+
+  const hasActiveFilters = Boolean(shipMonth || settlementMonth || modeFilter || statusFilter || blFilter || query.trim());
 
   function clearFilters() {
-    setMonth("");
+    setShipMonth("");
+    setSettlementMonth("");
+    setModeFilter("");
+    setStatusFilter("");
     setBlFilter("");
-    setContainerFilter("");
-    setDutyFilter("");
     setQuery("");
   }
-
-  const loadDrilldown = useCallback(async (blNo: string) => {
-    setSelectedBlNo(blNo);
-    setIsDrilldownLoading(true);
-    setDrilldown(null);
-    try {
-      const response = await fetch(`/api/logistics-settlement/ocean/bl/${encodeURIComponent(blNo)}`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "BL 상세 데이터를 불러오지 못했습니다.");
-      setDrilldown(payload as BlDrilldown);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setIsDrilldownLoading(false);
-    }
-  }, []);
 
   async function signInWithGoogle() {
     try {
@@ -219,7 +238,7 @@ export default function OceanSettlementClient({
       await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=/global/logistics-settlement/ocean`,
+          redirectTo: `${window.location.origin}/auth/callback?next=/global/logistics-settlement`,
         },
       });
     } catch (loginError) {
@@ -234,7 +253,7 @@ export default function OceanSettlementClient({
           <BrandMark className="h-10 w-10" />
           <p className="eyebrow mt-5">Protected settlement mart</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
-            해상 정산 분석
+            글로벌 정산 분석
           </h1>
           <p className="mt-3 text-sm leading-6 text-muted">{authMessage}</p>
           {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
@@ -251,208 +270,286 @@ export default function OceanSettlementClient({
 
   return (
     <main className="min-h-screen bg-page px-4 py-6 text-ink sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-5">
+      <div className="mx-auto flex max-w-[96rem] flex-col gap-5">
         <PageHeader
           eyebrow="Global Logistics Settlement"
-          title="해상 정산 분석"
-          description="boosters_scm 이동 로그와 Supabase 정산 mart를 연결해 BL/SKU 단위 해상 운송비, 관세, 기타비용 배부 결과를 확인합니다."
+          title="글로벌 정산 분석"
+          description="SCM 이동/발송 원장을 기본으로 깔고, 정산 분석이 완료된 행에만 SKU별 운송비·관세·기타비용 배부 결과를 표시합니다."
           actions={
             <>
               <Link className="btn btn-secondary" href="/global/scm-dashboard">
                 SCM Dashboard
               </Link>
-              <button className="btn btn-primary" disabled={isLoading || Boolean(authMessage)} onClick={() => void loadSummary()}>
+              <button className="btn btn-primary" disabled={isLoading} onClick={() => void loadSummary()}>
                 {isLoading ? "새로고침 중" : "새로고침"}
               </button>
             </>
           }
         />
 
-        {authMessage ? <Banner tone="warn">{authMessage}</Banner> : null}
         {error ? <Banner tone="danger">{error}</Banner> : null}
 
         <Panel>
-          <div className="grid gap-3 lg:grid-cols-[9rem_12rem_10rem_10rem_1fr_auto] lg:items-end">
+          <div className="grid gap-3 lg:grid-cols-[9rem_9rem_9rem_9rem_12rem_1fr_auto] lg:items-end">
+            <SelectFilter label="출고월" value={shipMonth} onChange={setShipMonth} options={shipMonthOptions} allLabel="전체" />
+            <SelectFilter label="정산월" value={settlementMonth} onChange={setSettlementMonth} options={settlementMonthOptions} allLabel="전체" />
+            <SelectFilter label="Mode" value={modeFilter} onChange={setModeFilter} options={modeOptions} allLabel="전체" />
             <label className="block">
-              <span className="field-label">정산월</span>
+              <span className="field-label">정산상태</span>
               <select
                 className="input mt-1 w-full"
-                value={month}
-                onChange={(event) => setMonth(event.target.value)}
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as "" | "analyzed" | "pending")}
               >
                 <option value="">전체</option>
-                {monthOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                <option value="analyzed">분석완료</option>
+                <option value="pending">미분석</option>
               </select>
             </label>
-            <label className="block">
-              <span className="field-label">BL</span>
-              <select
-                className="input mt-1 w-full"
-                value={blFilter}
-                onChange={(event) => setBlFilter(event.target.value)}
-              >
-                <option value="">전체 BL</option>
-                {blOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="field-label">Container</span>
-              <select
-                className="input mt-1 w-full"
-                value={containerFilter}
-                onChange={(event) => setContainerFilter(event.target.value)}
-              >
-                <option value="">전체</option>
-                {containerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="field-label">관세 상태</span>
-              <select
-                className="input mt-1 w-full"
-                value={dutyFilter}
-                onChange={(event) => setDutyFilter(event.target.value as "" | "with-duty" | "without-duty")}
-              >
-                <option value="">전체</option>
-                <option value="with-duty">관세 있음</option>
-                <option value="without-duty">관세 없음</option>
-              </select>
-            </label>
+            <SelectFilter label="BL" value={blFilter} onChange={setBlFilter} options={blOptions} allLabel="전체 BL" />
             <label className="block">
               <span className="field-label">검색</span>
               <input
                 className="input mt-1 w-full"
-                placeholder="SKU 코드, 상품명, BL, Invoice 검색"
+                placeholder="Invoice, BL, SKU, 상품명, 창고 검색"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
-            <button
-              className="btn btn-secondary"
-              disabled={!hasActiveFilters}
-              onClick={clearFilters}
-              type="button"
-            >
+            <button className="btn btn-secondary" disabled={!hasActiveFilters} onClick={clearFilters} type="button">
               필터 초기화
             </button>
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-faint">
             <span>
-              KPI와 테이블은 현재 필터 기준입니다. DUTY만 관세, CUSTOMS는 통관수수료로 기타에 포함합니다.
+              SKU 배부 분석은 전체 발송 원장 기준입니다. 분석 전 행은 비용 컬럼을 비워 두고, DUTY만 관세이며 CUSTOMS는 기타비용입니다.
             </span>
-            <span>
-              {user ? `${user.email} · ` : ""}
-              {summary.meta.generatedAt ? `generated ${summary.meta.generatedAt.slice(0, 19)}` : "mart 대기"}
-            </span>
+            <span>{user.email} · {summary.meta.generatedAt ? `generated ${summary.meta.generatedAt.slice(0, 19)}` : "mart 대기"}</span>
           </div>
         </Panel>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <Panel><Stat label="BL / Invoice" value={`${formatNumber(filteredStats.blCount)} BL`} hint={`${formatNumber(filteredStats.invoiceCount)} invoices`} /></Panel>
-          <Panel><Stat label="출고 수량" value={`${formatNumber(filteredStats.qtyEa)} EA`} hint={`${formatNumber(filteredStats.qtyCtn)} CTN`} /></Panel>
-          <Panel><Stat label="총 정산 물류비" value={formatCompactKrw(filteredStats.logisticsKrw)} tone="ok" hint={formatKrw(filteredStats.logisticsKrw)} /></Panel>
-          <Panel><Stat label="평균 물류비/EA" value={`${formatUnit(filteredStats.avgLogisticsUnitKrw)}원`} tone="brand" hint="총 배부액 ÷ EA" /></Panel>
-          <Panel><Stat label="운송비" value={formatCompactKrw(filteredStats.freightKrw)} tone="brand" hint={formatKrw(filteredStats.freightKrw)} /></Panel>
-          <Panel><Stat label="관세 / 기타" value={formatCompactKrw(filteredStats.dutyKrw)} tone="warn" hint={`기타 ${formatCompactKrw(filteredStats.otherKrw)}`} /></Panel>
+          <Panel><Stat label="전체 발송 row" value={formatNumber(filteredStats.rowCount)} hint={`미분석 ${formatNumber(filteredStats.pendingRowCount)} rows`} /></Panel>
+          <Panel><Stat label="분석 완료율" value={`${(filteredStats.analyzedRate * 100).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`} hint={`${formatNumber(filteredStats.analyzedRowCount)} analyzed`} tone="ok" /></Panel>
+          <Panel><Stat label="전체 발송 수량" value={`${formatNumber(filteredStats.qtyEa)} EA`} hint={`${formatNumber(filteredStats.qtyCtn)} CTN`} /></Panel>
+          <Panel><Stat label="총 배부 물류비" value={formatCompactKrw(filteredStats.logisticsKrw)} tone="ok" hint={formatKrw(filteredStats.logisticsKrw)} /></Panel>
+          <Panel><Stat label="평균 물류비/EA" value={`${formatUnit(filteredStats.avgLogisticsUnitKrw)}원`} tone="brand" hint="분석완료 EA 기준" /></Panel>
+          <Panel><Stat label="운송 / 관세 / 기타" value={formatCompactKrw(filteredStats.freightKrw)} tone="brand" hint={`관세 ${formatCompactKrw(filteredStats.dutyKrw)} · 기타 ${formatCompactKrw(filteredStats.otherKrw)}`} /></Panel>
         </div>
 
-        <Panel>
-          <PanelHeader
-            title="BL × SKU allocation"
-            eyebrow="Ocean MVP"
-            meta={`${formatNumber(filteredRows.length)} / ${formatNumber(summary.rows.length)} rows`}
-          />
-          <div className="overflow-auto rounded-xl border border-line">
-            <table className="min-w-full divide-y divide-line text-sm">
-              <thead className="bg-surface-muted text-xs text-muted">
-                <tr>
-                  <th className="px-3 py-2 text-left">월</th>
-                  <th className="px-3 py-2 text-left">BL</th>
-                  <th className="px-3 py-2 text-left">Invoice</th>
-                  <th className="px-3 py-2 text-left">SKU</th>
-                  <th className="px-3 py-2 text-right">EA</th>
-                  <th className="px-3 py-2 text-right">운송/EA</th>
-                  <th className="px-3 py-2 text-right">관세/EA</th>
-                  <th className="px-3 py-2 text-right">기타/EA</th>
-                  <th className="px-3 py-2 text-right">총/EA</th>
-                  <th className="px-3 py-2 text-right">총 배부액</th>
-                  <th className="px-3 py-2 text-left">Container</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line bg-surface">
-                {filteredRows.map((row) => (
-                  <tr key={row.rawKey} className="hover:bg-surface-muted/60">
-                    <td className="px-3 py-2 tabular-nums text-faint">{row.settlementMonth || "-"}</td>
-                    <td className="px-3 py-2">
-                      <button className="text-brand-ink underline-offset-2 hover:underline" onClick={() => void loadDrilldown(row.blNo)}>
-                        {row.blNo || "-"}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 text-xs tabular-nums text-faint">{row.invoiceNo || "-"}</td>
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-ink">{row.resourceCode}</div>
-                      <div className="max-w-[18rem] truncate text-xs text-faint">{row.resourceName}</div>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatNumber(row.qtyEa)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuFreightUnitKrw)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuDutyUnitKrw)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuOtherUnitKrw)}</td>
-                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatUnit(row.skuLogisticsUnitKrw)}</td>
-                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatKrw(row.skuLogisticsAllocKrw)}</td>
-                    <td className="px-3 py-2"><StatusPill tone={/20/.test(row.containerType) ? "warn" : "neutral"}>{row.containerType || "미지정"}</StatusPill></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-
-        <div className="grid gap-4 lg:grid-cols-[1fr_1.5fr]">
-          <Panel>
-            <PanelHeader title="Exception summary" meta="MVP checks" />
-            <div className="space-y-2">
-              {summary.exceptions.map((item) => (
-                <div key={item.code} className="flex items-center justify-between rounded-lg border border-line px-3 py-2">
-                  <StatusPill tone={item.tone}>{item.label}</StatusPill>
-                  <span className="font-semibold tabular-nums">{formatNumber(item.count)}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel>
-            <PanelHeader title="BL drilldown" meta={selectedBlNo ?? "BL 선택"} />
-            {isDrilldownLoading ? <p className="text-sm text-muted">상세를 불러오는 중입니다.</p> : null}
-            {!isDrilldownLoading && !drilldown ? <p className="text-sm text-muted">왼쪽 테이블에서 BL을 선택하세요.</p> : null}
-            {drilldown ? (
-              <div className="space-y-4 text-sm">
-                <div>
-                  <p className="field-label mb-2">정산 원본 라인</p>
-                  <div className="max-h-56 overflow-auto rounded-lg border border-line">
-                    <table className="min-w-full divide-y divide-line text-xs">
-                      <tbody className="divide-y divide-line">
-                        {drilldown.settlementLines.map((line) => (
-                          <tr key={line.rawKey}>
-                            <td className="px-2 py-1">{line.invoiceDate}</td>
-                            <td className="px-2 py-1">{line.country}</td>
-                            <td className="px-2 py-1">{line.chargeType}</td>
-                            <td className="px-2 py-1 text-right tabular-nums">{formatKrw(line.amountKrw + line.taxKrw)}</td>
-                            <td className="px-2 py-1">{line.containerType}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div>
-                  <p className="field-label mb-2">배부 라인</p>
-                  <p className="text-muted">{formatNumber(drilldown.allocations.length)} SKU rows</p>
-                </div>
-              </div>
-            ) : null}
-          </Panel>
+        <div className="flex flex-wrap gap-2">
+          <TabButton active={activeTab === "analysis"} onClick={() => setActiveTab("analysis")}>SKU 배부 분석</TabButton>
+          <TabButton active={activeTab === "ocean-source"} onClick={() => setActiveTab("ocean-source")}>해상_정산 원천</TabButton>
+          <TabButton active={activeTab === "monthly"} onClick={() => setActiveTab("monthly")}>월별 SKU 단가</TabButton>
         </div>
+
+        {activeTab === "analysis" ? <AnalysisTable rows={filteredRows} /> : null}
+        {activeTab === "ocean-source" ? <OceanSourceTable rows={filteredOceanRows} /> : null}
+        {activeTab === "monthly" ? <MonthlyTable rows={filteredMonthlyRows} /> : null}
       </div>
     </main>
   );
+}
+
+function SelectFilter({
+  label,
+  value,
+  onChange,
+  options,
+  allLabel,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  allLabel: string;
+}) {
+  return (
+    <label className="block">
+      <span className="field-label">{label}</span>
+      <select className="input mt-1 w-full" value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">{allLabel}</option>
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button className={`btn ${active ? "btn-primary" : "btn-secondary"}`} onClick={onClick} type="button">
+      {children}
+    </button>
+  );
+}
+
+function AnalysisTable({ rows }: { rows: ShipmentAnalysisRow[] }) {
+  return (
+    <Panel>
+      <PanelHeader title="SKU 배부 분석" eyebrow="doc_analysis" meta={`${formatNumber(rows.length)} rows`} />
+      <div className="overflow-auto rounded-xl border border-line">
+        <table className="min-w-[118rem] divide-y divide-line text-xs">
+          <thead className="bg-surface-muted text-xs text-muted">
+            <tr>
+              <th className="px-3 py-2 text-left">상태</th>
+              <th className="px-3 py-2 text-left">인보이스 번호</th>
+              <th className="px-3 py-2 text-left">carrier</th>
+              <th className="px-3 py-2 text-left">mode</th>
+              <th className="px-3 py-2 text-left">출고일</th>
+              <th className="px-3 py-2 text-left">BL</th>
+              <th className="px-3 py-2 text-left">From → To</th>
+              <th className="px-3 py-2 text-left">SKU</th>
+              <th className="px-3 py-2 text-right">EA</th>
+              <th className="px-3 py-2 text-right">CTN</th>
+              <th className="px-3 py-2 text-right">중량비중</th>
+              <th className="px-3 py-2 text-right">인보이스 총 물류비</th>
+              <th className="px-3 py-2 text-right">인보이스 총 운송비</th>
+              <th className="px-3 py-2 text-right">인보이스 총 관세</th>
+              <th className="px-3 py-2 text-right">인보이스 총 기타비</th>
+              <th className="px-3 py-2 text-right">SKU 물류비 배분</th>
+              <th className="px-3 py-2 text-right">SKU 물류비 단가</th>
+              <th className="px-3 py-2 text-right">SKU 운송비 단가</th>
+              <th className="px-3 py-2 text-right">SKU 관세 단가</th>
+              <th className="px-3 py-2 text-right">SKU 기타비 단가</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line bg-surface">
+            {rows.map((row) => (
+              <tr key={row.sourceLineId} className="hover:bg-surface-muted/60">
+                <td className="px-3 py-2"><StatusPill tone={row.analysisStatus === "analyzed" ? "ok" : "neutral"}>{row.analysisStatus === "analyzed" ? "분석완료" : "미분석"}</StatusPill></td>
+                <td className="px-3 py-2 font-medium tabular-nums">{row.invoiceNo}</td>
+                <td className="px-3 py-2">{row.carrier}</td>
+                <td className="px-3 py-2"><StatusPill tone={modeTone(row.carrierMode)}>{row.carrierMode || "-"}</StatusPill></td>
+                <td className="px-3 py-2 tabular-nums text-faint">{row.shipDate || "-"}</td>
+                <td className="px-3 py-2 tabular-nums text-brand-ink">{row.blNo || "-"}</td>
+                <td className="px-3 py-2 text-faint">{row.fromWarehouse || "-"} → {row.toWarehouse || "-"}</td>
+                <td className="px-3 py-2">
+                  <div className="font-medium text-ink">{row.resourceCode}</div>
+                  <div className="max-w-[18rem] truncate text-xs text-faint">{row.resourceName}</div>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatNumber(row.qtyEa)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatNumber(row.qtyCtn)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{row.analysisStatus === "analyzed" ? `${formatUnit(row.weightRatioPct)}%` : "-"}</td>
+                <CostCell value={row.invoiceTotalLogisticsKrw} analyzed={row.analysisStatus === "analyzed"} />
+                <CostCell value={row.invoiceTotalFreightKrw} analyzed={row.analysisStatus === "analyzed"} />
+                <CostCell value={row.invoiceTotalDutyKrw} analyzed={row.analysisStatus === "analyzed"} />
+                <CostCell value={row.invoiceTotalOtherKrw} analyzed={row.analysisStatus === "analyzed"} />
+                <CostCell value={row.skuLogisticsAllocKrw} analyzed={row.analysisStatus === "analyzed"} strong />
+                <UnitCell value={row.skuLogisticsUnitKrw} analyzed={row.analysisStatus === "analyzed"} strong />
+                <UnitCell value={row.skuFreightUnitKrw} analyzed={row.analysisStatus === "analyzed"} />
+                <UnitCell value={row.skuDutyUnitKrw} analyzed={row.analysisStatus === "analyzed"} />
+                <UnitCell value={row.skuOtherUnitKrw} analyzed={row.analysisStatus === "analyzed"} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function OceanSourceTable({ rows }: { rows: OceanSettlementLineRow[] }) {
+  return (
+    <Panel>
+      <PanelHeader title="해상_정산 원천" eyebrow="stg_settlement_ocean_lines" meta={`${formatNumber(rows.length)} rows`} />
+      <div className="overflow-auto rounded-xl border border-line">
+        <table className="min-w-[76rem] divide-y divide-line text-xs">
+          <thead className="bg-surface-muted text-xs text-muted">
+            <tr>
+              <th className="px-3 py-2 text-left">invoice_date</th>
+              <th className="px-3 py-2 text-left">BL</th>
+              <th className="px-3 py-2 text-left">country</th>
+              <th className="px-3 py-2 text-left">charge_type</th>
+              <th className="px-3 py-2 text-left">currency</th>
+              <th className="px-3 py-2 text-right">amount_orig</th>
+              <th className="px-3 py-2 text-right">amount_krw</th>
+              <th className="px-3 py-2 text-right">tax</th>
+              <th className="px-3 py-2 text-left">container</th>
+              <th className="px-3 py-2 text-left">file</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line bg-surface">
+            {rows.map((row) => (
+              <tr key={row.rawKey} className="hover:bg-surface-muted/60">
+                <td className="px-3 py-2 tabular-nums text-faint">{row.invoiceDate || "-"}</td>
+                <td className="px-3 py-2 tabular-nums text-brand-ink">{row.blNo}</td>
+                <td className="px-3 py-2">{row.country}</td>
+                <td className="px-3 py-2"><StatusPill tone={row.chargeType === "DUTY" ? "warn" : row.chargeType === "OCEAN" ? "brand" : "neutral"}>{row.chargeType}</StatusPill></td>
+                <td className="px-3 py-2">{row.currency}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatNumber(row.amountOrig)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatKrw(row.amountKrw)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatKrw(row.taxKrw)}</td>
+                <td className="px-3 py-2"><StatusPill>{row.containerType || "미지정"}</StatusPill></td>
+                <td className="px-3 py-2 max-w-[18rem] truncate text-faint">{row.fileName || "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function MonthlyTable({ rows }: { rows: MonthlySkuCostRow[] }) {
+  return (
+    <Panel>
+      <PanelHeader title="월별 SKU 단가" eyebrow="mart_logistics_monthly_sku_cost" meta={`${formatNumber(rows.length)} rows`} />
+      <div className="overflow-auto rounded-xl border border-line">
+        <table className="min-w-[82rem] divide-y divide-line text-xs">
+          <thead className="bg-surface-muted text-xs text-muted">
+            <tr>
+              <th className="px-3 py-2 text-left">월</th>
+              <th className="px-3 py-2 text-left">mode</th>
+              <th className="px-3 py-2 text-left">SKU</th>
+              <th className="px-3 py-2 text-right">EA</th>
+              <th className="px-3 py-2 text-right">BL</th>
+              <th className="px-3 py-2 text-right">Invoice</th>
+              <th className="px-3 py-2 text-right">월 총 물류비</th>
+              <th className="px-3 py-2 text-right">SKU 배부액</th>
+              <th className="px-3 py-2 text-right">총/EA</th>
+              <th className="px-3 py-2 text-right">운송/EA</th>
+              <th className="px-3 py-2 text-right">관세/EA</th>
+              <th className="px-3 py-2 text-right">기타/EA</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line bg-surface">
+            {rows.map((row) => (
+              <tr key={row.rawKey} className="hover:bg-surface-muted/60">
+                <td className="px-3 py-2 tabular-nums text-faint">{row.month}</td>
+                <td className="px-3 py-2"><StatusPill tone={modeTone(row.carrierMode)}>{row.carrierMode}</StatusPill></td>
+                <td className="px-3 py-2">
+                  <div className="font-medium text-ink">{row.resourceCode}</div>
+                  <div className="max-w-[18rem] truncate text-xs text-faint">{row.resourceName}</div>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatNumber(row.qtyEa)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatNumber(row.blCount)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatNumber(row.invoiceCount)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatKrw(row.monthlyTotalLogisticsKrw)}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">{formatKrw(row.skuLogisticsAllocKrw)}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">{formatUnit(row.skuLogisticsUnitKrw)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuFreightUnitKrw)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuDutyUnitKrw)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuOtherUnitKrw)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function CostCell({ value, analyzed, strong = false }: { value: number; analyzed: boolean; strong?: boolean }) {
+  return <td className={`px-3 py-2 text-right tabular-nums ${strong ? "font-semibold" : ""}`}>{analyzed ? formatKrw(value) : "-"}</td>;
+}
+
+function UnitCell({ value, analyzed, strong = false }: { value: number; analyzed: boolean; strong?: boolean }) {
+  return <td className={`px-3 py-2 text-right tabular-nums ${strong ? "font-semibold" : ""}`}>{analyzed ? formatUnit(value) : "-"}</td>;
+}
+
+function modeTone(mode: string) {
+  if (mode === "해상") return "brand" as const;
+  if (mode === "SEND") return "ok" as const;
+  if (mode === "택배" || mode === "그라운드") return "warn" as const;
+  return "neutral" as const;
 }
