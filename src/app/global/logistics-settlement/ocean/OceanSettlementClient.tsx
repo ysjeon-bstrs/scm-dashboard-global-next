@@ -360,21 +360,23 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
   const [result, setResult] = useState<unknown>(null);
   const [jobError, setJobError] = useState<string | null>(null);
 
-  async function runJob(endpoint: string, body: Record<string, unknown>) {
+  async function runJob(endpoint: string, body?: Record<string, unknown>) {
     setIsRunning(endpoint);
     setJobError(null);
     try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const response = await fetch(endpoint, body
+        ? {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }
+        : { method: "GET", cache: "no-store" });
       const payload = await response.json();
       setResult(payload);
       if (!response.ok) {
         throw new Error(payload.errors?.[0]?.message ?? payload.error ?? "작업 실행 실패");
       }
-      if (endpoint.includes("import-apply") || body.apply === true) onRefresh();
+      if (body?.apply === true) onRefresh();
     } catch (err) {
       setJobError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -388,9 +390,9 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
   return (
     <Panel>
       <PanelHeader
-        eyebrow="M1 ocean import console"
-        title="적재/분석 작업"
-        meta="Sheet 적재 → SKU 배부 재계산 → 검증"
+        eyebrow="M1 Supabase-first console"
+        title="DB 적재/분석 작업"
+        meta="Staging 현황 → SKU 배부 재계산 → 검증"
       />
       <div className="grid gap-3 lg:grid-cols-[10rem_10rem_1fr] lg:items-end">
         <label className="block">
@@ -402,30 +404,21 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
           <input className="input mt-1 w-full" value={limit} onChange={(event) => setLimit(event.target.value)} />
         </label>
         <div className="text-xs leading-5 text-faint">
-          M1은 Drive 파일명을 수정하지 않습니다. Google Sheet `해상_정산`을 읽어 Supabase staging에 적재하고, mart를 재계산합니다.
+          M1 운영 기준은 Supabase DB입니다. 과거 Sheet 데이터는 관리자 CLI로 bootstrap하고, 웹은 staging/mart 현황 확인·재계산·검증만 수행합니다. 향후 신규 정산서는 Google Drive 보관소로 적재한 뒤 Drive source registry를 통해 검색/적재/분석합니다.
         </div>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <JobActionCard
-          title="1. 적재 Dry-run"
-          description="해상_정산 Sheet를 읽고 staging 변환/집계만 미리 확인합니다."
-          button="Dry-run 실행"
+          title="1. DB 적재 현황"
+          description="Supabase stg_settlement_ocean_lines 기준 row/BL/file/금액 현황을 확인합니다."
+          button="현황 확인"
           disabled={Boolean(isRunning)}
-          running={isRunning === "/api/logistics-settlement/jobs/import-dry-run"}
-          onClick={() => void runJob("/api/logistics-settlement/jobs/import-dry-run", { limit: scope.limit })}
+          running={isRunning === "/api/logistics-settlement/jobs/staging-status"}
+          onClick={() => void runJob("/api/logistics-settlement/jobs/staging-status")}
         />
         <JobActionCard
-          title="2. 적재 적용"
-          description="stg_settlement_ocean_lines에 upsert합니다. 동일 row는 중복 없이 갱신됩니다."
-          button="적재 적용"
-          disabled={Boolean(isRunning)}
-          running={isRunning === "/api/logistics-settlement/jobs/import-apply"}
-          tone="warn"
-          onClick={() => void runJob("/api/logistics-settlement/jobs/import-apply", { limit: scope.limit, confirmation: "APPLY_OCEAN_IMPORT" })}
-        />
-        <JobActionCard
-          title="3. SKU 배부 재계산"
-          description="해상 이동 원장과 staging을 이용해 doc_analysis/monthly mart를 재계산합니다."
+          title="2. SKU 배부 재계산"
+          description="해상 이동 원장과 Supabase staging을 이용해 doc_analysis/monthly mart를 재계산합니다."
           button="재계산 적용"
           disabled={Boolean(isRunning)}
           running={isRunning === "/api/logistics-settlement/jobs/recompute"}
@@ -433,12 +426,20 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
           onClick={() => void runJob("/api/logistics-settlement/jobs/recompute", { ...scope, apply: true, confirmation: "APPLY_OCEAN_RECOMPUTE" })}
         />
         <JobActionCard
-          title="4. 검증"
+          title="3. 검증"
           description="원천/이동/배부 row와 warning을 PASS/WARN/FAIL로 확인합니다."
           button="검증 실행"
           disabled={Boolean(isRunning)}
           running={isRunning === "/api/logistics-settlement/jobs/validate"}
           onClick={() => void runJob("/api/logistics-settlement/jobs/validate", scope)}
+        />
+        <JobActionCard
+          title="4. 결과 새로고침"
+          description="재계산 후 SKU 배부 분석, 해상_정산 원천, 월별 SKU 단가 탭을 다시 불러옵니다."
+          button="화면 새로고침"
+          disabled={Boolean(isRunning)}
+          running={false}
+          onClick={onRefresh}
         />
       </div>
       {jobError ? <Banner tone="danger">{jobError}</Banner> : null}
