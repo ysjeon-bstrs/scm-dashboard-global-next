@@ -159,3 +159,48 @@ create table if not exists public.etl_run_logs (
   summary jsonb,
   error_message text
 );
+
+create table if not exists public.logistics_settlement_source_files (
+  raw_key text primary key,
+  mode text not null,
+  provider text not null default 'google_drive',
+  file_id text not null,
+  file_name text not null,
+  normalized_name text not null default '',
+  mime_type text not null default '',
+  web_view_link text not null default '',
+  parent_folder_id text not null default '',
+  modified_time timestamptz,
+  size_bytes bigint,
+  detected_invoice_no text not null default '',
+  detected_bl_no text not null default '',
+  detected_period text not null default '',
+  scan_status text not null default 'FOUND',
+  import_status text not null default 'NOT_IMPORTED',
+  last_scan_run_id text not null default '',
+  last_import_run_id text not null default '',
+  warnings jsonb not null default '[]'::jsonb,
+  source_hash text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (provider, file_id)
+);
+
+create index if not exists idx_logistics_source_files_mode_status
+  on public.logistics_settlement_source_files (mode, scan_status, import_status);
+
+create index if not exists idx_logistics_source_files_bl
+  on public.logistics_settlement_source_files (detected_bl_no);
+
+create table if not exists public.logistics_settlement_job_events (
+  id bigserial primary key,
+  etl_run_id text not null,
+  level text not null default 'INFO',
+  step text not null,
+  message text not null,
+  context jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_logistics_job_events_run
+  on public.logistics_settlement_job_events (etl_run_id, id);

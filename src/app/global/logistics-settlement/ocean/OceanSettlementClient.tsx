@@ -27,7 +27,7 @@ type OceanSettlementClientProps = {
   initialAuthError: "unauthenticated" | "forbidden-domain" | null;
 };
 
-type TabKey = "analysis" | "ocean-source" | "monthly";
+type TabKey = "jobs" | "analysis" | "ocean-source" | "monthly";
 
 const emptySummary: LogisticsSettlementSummary = {
   meta: {
@@ -102,7 +102,7 @@ export default function OceanSettlementClient({
   initialAuthError,
 }: OceanSettlementClientProps) {
   const [summary, setSummary] = useState<LogisticsSettlementSummary>(emptySummary);
-  const [activeTab, setActiveTab] = useState<TabKey>("analysis");
+  const [activeTab, setActiveTab] = useState<TabKey>("jobs");
   const [shipMonth, setShipMonth] = useState("");
   const [settlementMonth, setSettlementMonth] = useState("");
   const [modeFilter, setModeFilter] = useState("");
@@ -338,16 +338,150 @@ export default function OceanSettlementClient({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}>적재/분석 작업</TabButton>
           <TabButton active={activeTab === "analysis"} onClick={() => setActiveTab("analysis")}>SKU 배부 분석</TabButton>
           <TabButton active={activeTab === "ocean-source"} onClick={() => setActiveTab("ocean-source")}>해상_정산 원천</TabButton>
           <TabButton active={activeTab === "monthly"} onClick={() => setActiveTab("monthly")}>월별 SKU 단가</TabButton>
         </div>
 
+        {activeTab === "jobs" ? <SettlementJobsPanel onRefresh={() => void loadSummary()} /> : null}
         {activeTab === "analysis" ? <AnalysisTable rows={filteredRows} /> : null}
         {activeTab === "ocean-source" ? <OceanSourceTable rows={filteredOceanRows} /> : null}
         {activeTab === "monthly" ? <MonthlyTable rows={filteredMonthlyRows} /> : null}
       </div>
     </main>
+  );
+}
+
+function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
+  const [month, setMonth] = useState("");
+  const [limit, setLimit] = useState("100");
+  const [isRunning, setIsRunning] = useState<string | null>(null);
+  const [result, setResult] = useState<unknown>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
+
+  async function runJob(endpoint: string, body: Record<string, unknown>) {
+    setIsRunning(endpoint);
+    setJobError(null);
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      setResult(payload);
+      if (!response.ok) {
+        throw new Error(payload.errors?.[0]?.message ?? payload.error ?? "작업 실행 실패");
+      }
+      if (endpoint.includes("import-apply") || body.apply === true) onRefresh();
+    } catch (err) {
+      setJobError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsRunning(null);
+    }
+  }
+
+  const parsedLimit = Number(limit || 0);
+  const scope = { month: month || undefined, limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : undefined };
+
+  return (
+    <Panel>
+      <PanelHeader
+        eyebrow="M1 ocean import console"
+        title="적재/분석 작업"
+        meta="Sheet 적재 → SKU 배부 재계산 → 검증"
+      />
+      <div className="grid gap-3 lg:grid-cols-[10rem_10rem_1fr] lg:items-end">
+        <label className="block">
+          <span className="field-label">정산월/출고월</span>
+          <input className="input mt-1 w-full" placeholder="YYYY-MM" value={month} onChange={(event) => setMonth(event.target.value)} />
+        </label>
+        <label className="block">
+          <span className="field-label">테스트 limit</span>
+          <input className="input mt-1 w-full" value={limit} onChange={(event) => setLimit(event.target.value)} />
+        </label>
+        <div className="text-xs leading-5 text-faint">
+          M1은 Drive 파일명을 수정하지 않습니다. Google Sheet `해상_정산`을 읽어 Supabase staging에 적재하고, mart를 재계산합니다.
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <JobActionCard
+          title="1. 적재 Dry-run"
+          description="해상_정산 Sheet를 읽고 staging 변환/집계만 미리 확인합니다."
+          button="Dry-run 실행"
+          disabled={Boolean(isRunning)}
+          running={isRunning === "/api/logistics-settlement/jobs/import-dry-run"}
+          onClick={() => void runJob("/api/logistics-settlement/jobs/import-dry-run", { limit: scope.limit })}
+        />
+        <JobActionCard
+          title="2. 적재 적용"
+          description="stg_settlement_ocean_lines에 upsert합니다. 동일 row는 중복 없이 갱신됩니다."
+          button="적재 적용"
+          disabled={Boolean(isRunning)}
+          running={isRunning === "/api/logistics-settlement/jobs/import-apply"}
+          tone="warn"
+          onClick={() => void runJob("/api/logistics-settlement/jobs/import-apply", { limit: scope.limit, confirmation: "APPLY_OCEAN_IMPORT" })}
+        />
+        <JobActionCard
+          title="3. SKU 배부 재계산"
+          description="해상 이동 원장과 staging을 이용해 doc_analysis/monthly mart를 재계산합니다."
+          button="재계산 적용"
+          disabled={Boolean(isRunning)}
+          running={isRunning === "/api/logistics-settlement/jobs/recompute"}
+          tone="warn"
+          onClick={() => void runJob("/api/logistics-settlement/jobs/recompute", { ...scope, apply: true, confirmation: "APPLY_OCEAN_RECOMPUTE" })}
+        />
+        <JobActionCard
+          title="4. 검증"
+          description="원천/이동/배부 row와 warning을 PASS/WARN/FAIL로 확인합니다."
+          button="검증 실행"
+          disabled={Boolean(isRunning)}
+          running={isRunning === "/api/logistics-settlement/jobs/validate"}
+          onClick={() => void runJob("/api/logistics-settlement/jobs/validate", scope)}
+        />
+      </div>
+      {jobError ? <Banner tone="danger">{jobError}</Banner> : null}
+      {result ? (
+        <div className="mt-4 rounded-xl border border-line bg-surface-muted p-4">
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
+            최근 작업 결과
+          </div>
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs leading-5 text-muted">{JSON.stringify(result, null, 2)}</pre>
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+function JobActionCard({
+  title,
+  description,
+  button,
+  disabled,
+  running,
+  tone = "brand",
+  onClick,
+}: {
+  title: string;
+  description: string;
+  button: string;
+  disabled: boolean;
+  running: boolean;
+  tone?: "brand" | "warn";
+  onClick: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-surface-muted p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+        <StatusPill tone={tone}>{tone === "warn" ? "write" : "read"}</StatusPill>
+      </div>
+      <p className="mt-2 min-h-12 text-xs leading-5 text-muted">{description}</p>
+      <button className={`btn mt-4 w-full ${tone === "warn" ? "btn-secondary" : "btn-primary"}`} disabled={disabled} onClick={onClick} type="button">
+        {running ? "실행 중" : button}
+      </button>
+    </div>
   );
 }
 
