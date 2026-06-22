@@ -107,7 +107,7 @@ export async function fetchOceanSettlementSummary(filters: {
   month?: string | null;
   limit?: number;
 }): Promise<OceanSettlementSummary> {
-  const env = getSupabaseRestEnv();
+  const env = getSupabaseRestEnv({ requireServiceRole: true });
   const limit = Number.isFinite(filters.limit) && filters.limit && filters.limit > 0 ? Math.min(filters.limit, 2000) : 500;
   const params = new URLSearchParams({
     select:
@@ -139,7 +139,7 @@ export async function fetchOceanSettlementSummary(filters: {
 }
 
 export async function fetchOceanBlDrilldown(blNo: string) {
-  const env = getSupabaseRestEnv();
+  const env = getSupabaseRestEnv({ requireServiceRole: true });
   const encodedBl = blNo.trim();
   if (!encodedBl) return { allocations: [], settlementLines: [] };
 

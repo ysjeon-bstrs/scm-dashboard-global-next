@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   Banner,
+  BrandMark,
   PageHeader,
   Panel,
   PanelHeader,
   Stat,
   StatusPill,
 } from "@/components/scm-dashboard/ui";
+import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
 import type {
   OceanAllocationListRow,
   OceanSettlementLineRow,
@@ -130,6 +132,42 @@ export default function OceanSettlementClient({
       setIsDrilldownLoading(false);
     }
   }, []);
+
+  async function signInWithGoogle() {
+    try {
+      const supabase = createBrowserSupabaseClient();
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=/global/logistics-settlement/ocean`,
+        },
+      });
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Login failed.");
+    }
+  }
+
+  if (!user) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-page px-4 py-12 text-ink">
+        <section className="panel w-full max-w-lg p-7 sm:p-9">
+          <BrandMark className="h-10 w-10" />
+          <p className="eyebrow mt-5">Protected settlement mart</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
+            해상 정산 분석
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-muted">{authMessage}</p>
+          {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
+          <button className="btn btn-primary mt-6" onClick={signInWithGoogle} type="button">
+            Google로 로그인
+          </button>
+          <Link className="btn btn-secondary mt-3" href="/global/scm-dashboard">
+            SCM Dashboard로 이동
+          </Link>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-page px-4 py-6 text-ink sm:px-6 lg:px-8">
