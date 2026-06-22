@@ -58,8 +58,35 @@ function formatKrw(value: number | null | undefined) {
   return `${formatNumber(value)}원`;
 }
 
+function formatCompactKrw(value: number | null | undefined) {
+  const amount = Number(value ?? 0);
+  if (Math.abs(amount) >= 100_000_000) {
+    return `${(amount / 100_000_000).toLocaleString("ko-KR", { maximumFractionDigits: 2 })}억원`;
+  }
+  if (Math.abs(amount) >= 10_000) {
+    return `${(amount / 10_000).toLocaleString("ko-KR", { maximumFractionDigits: 0 })}만원`;
+  }
+  return formatKrw(amount);
+}
+
 function formatUnit(value: number | null | undefined) {
   return Number(value ?? 0).toLocaleString("ko-KR", { maximumFractionDigits: 1 });
+}
+
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => b.localeCompare(a));
+}
+
+function allocatedFreight(row: OceanAllocationListRow) {
+  return row.skuFreightUnitKrw * row.qtyEa;
+}
+
+function allocatedDuty(row: OceanAllocationListRow) {
+  return row.skuDutyUnitKrw * row.qtyEa;
+}
+
+function allocatedOther(row: OceanAllocationListRow) {
+  return row.skuOtherUnitKrw * row.qtyEa;
 }
 
 export default function OceanSettlementClient({
@@ -68,6 +95,9 @@ export default function OceanSettlementClient({
 }: OceanSettlementClientProps) {
   const [summary, setSummary] = useState<OceanSettlementSummary>(emptySummary);
   const [month, setMonth] = useState("");
+  const [blFilter, setBlFilter] = useState("");
+  const [containerFilter, setContainerFilter] = useState("");
+  const [dutyFilter, setDutyFilter] = useState<"" | "with-duty" | "without-duty">("");
   const [query, setQuery] = useState("");
   const [selectedBlNo, setSelectedBlNo] = useState<string | null>(null);
   const [drilldown, setDrilldown] = useState<BlDrilldown | null>(null);
@@ -86,8 +116,7 @@ export default function OceanSettlementClient({
     setIsLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ limit: "1000" });
-      if (month) params.set("month", month);
+      const params = new URLSearchParams({ limit: "2000" });
       const response = await fetch(`/api/logistics-settlement/ocean/summary?${params.toString()}`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "해상 정산 데이터를 불러오지 못했습니다.");
@@ -98,7 +127,7 @@ export default function OceanSettlementClient({
     } finally {
       setIsLoading(false);
     }
-  }, [authMessage, month]);
+  }, [authMessage]);
 
   useEffect(() => {
     // Initial data is loaded from authenticated API routes.
@@ -106,16 +135,67 @@ export default function OceanSettlementClient({
     void loadSummary();
   }, [loadSummary]);
 
+  const monthOptions = useMemo(
+    () => uniqueSorted(summary.rows.map((row) => row.settlementMonth)),
+    [summary.rows],
+  );
+  const blOptions = useMemo(
+    () => uniqueSorted(summary.rows.map((row) => row.blNo)),
+    [summary.rows],
+  );
+  const containerOptions = useMemo(
+    () => uniqueSorted(summary.rows.map((row) => row.containerType || "미지정")),
+    [summary.rows],
+  );
+
   const filteredRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return summary.rows;
-    return summary.rows.filter((row) =>
-      [row.blNo, row.invoiceNo, row.resourceCode, row.resourceName, row.containerType]
+    return summary.rows.filter((row) => {
+      if (month && row.settlementMonth !== month) return false;
+      if (blFilter && row.blNo !== blFilter) return false;
+      const container = row.containerType || "미지정";
+      if (containerFilter && container !== containerFilter) return false;
+      if (dutyFilter === "with-duty" && row.skuDutyUnitKrw <= 0) return false;
+      if (dutyFilter === "without-duty" && row.skuDutyUnitKrw > 0) return false;
+      if (!needle) return true;
+      return [row.blNo, row.invoiceNo, row.resourceCode, row.resourceName, row.containerType]
         .join(" ")
         .toLowerCase()
-        .includes(needle),
-    );
-  }, [query, summary.rows]);
+        .includes(needle);
+    });
+  }, [blFilter, containerFilter, dutyFilter, month, query, summary.rows]);
+
+  const filteredStats = useMemo(() => {
+    const blCount = new Set(filteredRows.map((row) => row.blNo).filter(Boolean)).size;
+    const invoiceCount = new Set(filteredRows.map((row) => row.invoiceNo).filter(Boolean)).size;
+    const qtyEa = filteredRows.reduce((sum, row) => sum + row.qtyEa, 0);
+    const qtyCtn = filteredRows.reduce((sum, row) => sum + row.qtyCtn, 0);
+    const freightKrw = filteredRows.reduce((sum, row) => sum + allocatedFreight(row), 0);
+    const dutyKrw = filteredRows.reduce((sum, row) => sum + allocatedDuty(row), 0);
+    const otherKrw = filteredRows.reduce((sum, row) => sum + allocatedOther(row), 0);
+    const logisticsKrw = filteredRows.reduce((sum, row) => sum + row.skuLogisticsAllocKrw, 0);
+    return {
+      blCount,
+      invoiceCount,
+      qtyEa,
+      qtyCtn,
+      freightKrw,
+      dutyKrw,
+      otherKrw,
+      logisticsKrw,
+      avgLogisticsUnitKrw: qtyEa > 0 ? logisticsKrw / qtyEa : 0,
+    };
+  }, [filteredRows]);
+
+  const hasActiveFilters = Boolean(month || blFilter || containerFilter || dutyFilter || query.trim());
+
+  function clearFilters() {
+    setMonth("");
+    setBlFilter("");
+    setContainerFilter("");
+    setDutyFilter("");
+    setQuery("");
+  }
 
   const loadDrilldown = useCallback(async (blNo: string) => {
     setSelectedBlNo(blNo);
@@ -192,38 +272,88 @@ export default function OceanSettlementClient({
         {error ? <Banner tone="danger">{error}</Banner> : null}
 
         <Panel>
-          <div className="grid gap-3 md:grid-cols-[12rem_1fr_auto] md:items-end">
+          <div className="grid gap-3 lg:grid-cols-[9rem_12rem_10rem_10rem_1fr_auto] lg:items-end">
             <label className="block">
               <span className="field-label">정산월</span>
-              <input
+              <select
                 className="input mt-1 w-full"
-                placeholder="YYYY-MM"
                 value={month}
                 onChange={(event) => setMonth(event.target.value)}
-              />
+              >
+                <option value="">전체</option>
+                {monthOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="field-label">BL</span>
+              <select
+                className="input mt-1 w-full"
+                value={blFilter}
+                onChange={(event) => setBlFilter(event.target.value)}
+              >
+                <option value="">전체 BL</option>
+                {blOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="field-label">Container</span>
+              <select
+                className="input mt-1 w-full"
+                value={containerFilter}
+                onChange={(event) => setContainerFilter(event.target.value)}
+              >
+                <option value="">전체</option>
+                {containerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="field-label">관세 상태</span>
+              <select
+                className="input mt-1 w-full"
+                value={dutyFilter}
+                onChange={(event) => setDutyFilter(event.target.value as "" | "with-duty" | "without-duty")}
+              >
+                <option value="">전체</option>
+                <option value="with-duty">관세 있음</option>
+                <option value="without-duty">관세 없음</option>
+              </select>
             </label>
             <label className="block">
               <span className="field-label">검색</span>
               <input
                 className="input mt-1 w-full"
-                placeholder="BL / invoice / SKU / 상품명 / container"
+                placeholder="SKU 코드, 상품명, BL, Invoice 검색"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
-            <div className="text-xs text-faint">
+            <button
+              className="btn btn-secondary"
+              disabled={!hasActiveFilters}
+              onClick={clearFilters}
+              type="button"
+            >
+              필터 초기화
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-faint">
+            <span>
+              KPI와 테이블은 현재 필터 기준입니다. DUTY만 관세, CUSTOMS는 통관수수료로 기타에 포함합니다.
+            </span>
+            <span>
               {user ? `${user.email} · ` : ""}
               {summary.meta.generatedAt ? `generated ${summary.meta.generatedAt.slice(0, 19)}` : "mart 대기"}
-            </div>
+            </span>
           </div>
         </Panel>
 
-        <div className="grid gap-4 md:grid-cols-5">
-          <Panel><Stat label="BL" value={formatNumber(summary.meta.blCount)} hint={`${formatNumber(summary.meta.invoiceCount)} invoices`} /></Panel>
-          <Panel><Stat label="수량" value={formatNumber(summary.totals.qtyEa)} hint={`${formatNumber(summary.totals.qtyCtn)} ctn`} /></Panel>
-          <Panel><Stat label="운송비" value={formatKrw(summary.totals.freightKrw)} tone="brand" /></Panel>
-          <Panel><Stat label="관세" value={formatKrw(summary.totals.dutyKrw)} tone="warn" /></Panel>
-          <Panel><Stat label="총 물류비" value={formatKrw(summary.totals.logisticsKrw)} tone="ok" hint={`기타 ${formatKrw(summary.totals.otherKrw)}`} /></Panel>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <Panel><Stat label="BL / Invoice" value={`${formatNumber(filteredStats.blCount)} BL`} hint={`${formatNumber(filteredStats.invoiceCount)} invoices`} /></Panel>
+          <Panel><Stat label="출고 수량" value={`${formatNumber(filteredStats.qtyEa)} EA`} hint={`${formatNumber(filteredStats.qtyCtn)} CTN`} /></Panel>
+          <Panel><Stat label="총 정산 물류비" value={formatCompactKrw(filteredStats.logisticsKrw)} tone="ok" hint={formatKrw(filteredStats.logisticsKrw)} /></Panel>
+          <Panel><Stat label="평균 물류비/EA" value={`${formatUnit(filteredStats.avgLogisticsUnitKrw)}원`} tone="brand" hint="총 배부액 ÷ EA" /></Panel>
+          <Panel><Stat label="운송비" value={formatCompactKrw(filteredStats.freightKrw)} tone="brand" hint={formatKrw(filteredStats.freightKrw)} /></Panel>
+          <Panel><Stat label="관세 / 기타" value={formatCompactKrw(filteredStats.dutyKrw)} tone="warn" hint={`기타 ${formatCompactKrw(filteredStats.otherKrw)}`} /></Panel>
         </div>
 
         <Panel>
@@ -238,12 +368,14 @@ export default function OceanSettlementClient({
                 <tr>
                   <th className="px-3 py-2 text-left">월</th>
                   <th className="px-3 py-2 text-left">BL</th>
+                  <th className="px-3 py-2 text-left">Invoice</th>
                   <th className="px-3 py-2 text-left">SKU</th>
                   <th className="px-3 py-2 text-right">EA</th>
                   <th className="px-3 py-2 text-right">운송/EA</th>
                   <th className="px-3 py-2 text-right">관세/EA</th>
                   <th className="px-3 py-2 text-right">기타/EA</th>
                   <th className="px-3 py-2 text-right">총/EA</th>
+                  <th className="px-3 py-2 text-right">총 배부액</th>
                   <th className="px-3 py-2 text-left">Container</th>
                 </tr>
               </thead>
@@ -256,6 +388,7 @@ export default function OceanSettlementClient({
                         {row.blNo || "-"}
                       </button>
                     </td>
+                    <td className="px-3 py-2 text-xs tabular-nums text-faint">{row.invoiceNo || "-"}</td>
                     <td className="px-3 py-2">
                       <div className="font-medium text-ink">{row.resourceCode}</div>
                       <div className="max-w-[18rem] truncate text-xs text-faint">{row.resourceName}</div>
@@ -265,6 +398,7 @@ export default function OceanSettlementClient({
                     <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuDutyUnitKrw)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatUnit(row.skuOtherUnitKrw)}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatUnit(row.skuLogisticsUnitKrw)}</td>
+                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatKrw(row.skuLogisticsAllocKrw)}</td>
                     <td className="px-3 py-2"><StatusPill tone={/20/.test(row.containerType) ? "warn" : "neutral"}>{row.containerType || "미지정"}</StatusPill></td>
                   </tr>
                 ))}
