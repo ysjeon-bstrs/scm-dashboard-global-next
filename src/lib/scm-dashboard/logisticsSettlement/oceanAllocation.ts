@@ -157,7 +157,29 @@ export function allocateOceanSettlement({
       const chargeType = normalize(line.chargeType);
 
       if (chargeType === "DUTY") {
-        dutyKrw += line.amountOrig && representativeFx ? line.amountOrig * representativeFx : 0;
+        const lineKrw = line.amountKrw + line.taxKrw;
+        if (lineKrw) {
+          // Trust the pre-converted KRW when present, like every non-DUTY charge.
+          dutyKrw += lineKrw;
+        } else if (line.amountOrig) {
+          // Otherwise convert from the original amount, preferring the line's own FX.
+          const fx = line.exrate || representativeFx;
+          if (fx) {
+            dutyKrw += line.amountOrig * fx;
+          } else {
+            warnings.push({
+              code: "MISSING_DUTY_FX",
+              blNo,
+              message: `No exchange rate for DUTY line on BL=${blNo}`,
+            });
+          }
+        } else {
+          warnings.push({
+            code: "MISSING_DUTY_AMOUNT",
+            blNo,
+            message: `DUTY line has neither amount_krw nor amount_orig on BL=${blNo}`,
+          });
+        }
         continue;
       }
 
@@ -268,11 +290,16 @@ export function allocateOceanSettlement({
         qtyCtn: move.qtyCtn,
         weightRatioPct: (freightBasis[index] / totalFreightBasis) * 100,
         valueRatioPct: (dutyBasis[index] / totalDutyBasis) * 100,
-        invoiceTotalLogisticsKrw: Math.round(freightKrw + dutyKrw + otherKrw),
+        // Sum of the three independently-rounded bucket totals so the BL total equals
+        // the sum of allocated SKU logistics by construction (no round-of-sum drift).
+        invoiceTotalLogisticsKrw: Math.round(freightKrw) + Math.round(dutyKrw) + Math.round(otherKrw),
         invoiceTotalFreightKrw: Math.round(freightKrw),
         invoiceTotalDutyKrw: Math.round(dutyKrw),
         invoiceTotalOtherKrw: Math.round(otherKrw),
         skuLogisticsAllocKrw: skuTotalKrw,
+        skuFreightKrw,
+        skuDutyKrw,
+        skuOtherKrw,
         skuLogisticsUnitKrw: divideByQty(skuTotalKrw, move.qtyEa),
         skuFreightUnitKrw: divideByQty(skuFreightKrw, move.qtyEa),
         skuDutyUnitKrw: divideByQty(skuDutyKrw, move.qtyEa),

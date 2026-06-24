@@ -50,9 +50,14 @@ export async function supabaseGetAll<T>(env: SupabaseEnv, table: string, query: 
   const rows: T[] = [];
   const pageSize = 1000;
 
-  for (let offset = 0; ; offset += pageSize) {
+  // Honor a caller-supplied `limit` as an overall row cap; absent/invalid means exhaustive.
+  const requestedLimit = Number(query.get("limit"));
+  const maxRows = Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : Infinity;
+
+  for (let offset = 0; rows.length < maxRows; offset += pageSize) {
+    const pageLimit = Math.min(pageSize, maxRows - rows.length);
     const params = new URLSearchParams(query);
-    params.set("limit", String(pageSize));
+    params.set("limit", String(pageLimit));
     params.set("offset", String(offset));
 
     const response = await fetch(`${env.url}/rest/v1/${table}?${params.toString()}`, {
@@ -68,8 +73,53 @@ export async function supabaseGetAll<T>(env: SupabaseEnv, table: string, query: 
 
     const page = (await response.json()) as T[];
     rows.push(...page);
-    if (page.length < pageSize) break;
+    if (page.length < pageLimit) break;
   }
 
   return rows;
+}
+
+function totalFromContentRange(header: string | null): number {
+  // PostgREST count header looks like "0-24/3573" or "*/3573"; the count is after the slash.
+  const total = header ? Number(header.split("/").pop()) : NaN;
+  return Number.isFinite(total) ? total : 0;
+}
+
+export async function supabaseCount(env: SupabaseEnv, table: string, filters: URLSearchParams): Promise<number> {
+  const response = await fetch(`${env.url}/rest/v1/${table}?${filters.toString()}`, {
+    method: "HEAD",
+    headers: {
+      apikey: env.apiKey,
+      authorization: `Bearer ${env.apiKey}`,
+      prefer: "count=exact",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase count failed for ${table}: ${response.status} ${await response.text()}`);
+  }
+
+  return totalFromContentRange(response.headers.get("content-range"));
+}
+
+export async function supabaseDelete(env: SupabaseEnv, table: string, filters: URLSearchParams): Promise<{ deleted: number }> {
+  // Safety: never issue an unfiltered DELETE (which would wipe the whole table).
+  if (Array.from(filters.keys()).length === 0) {
+    throw new Error(`supabaseDelete refused: no filters for ${table}`);
+  }
+
+  const response = await fetch(`${env.url}/rest/v1/${table}?${filters.toString()}`, {
+    method: "DELETE",
+    headers: {
+      apikey: env.apiKey,
+      authorization: `Bearer ${env.apiKey}`,
+      prefer: "count=exact,return=minimal",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase delete failed for ${table}: ${response.status} ${await response.text()}`);
+  }
+
+  return { deleted: totalFromContentRange(response.headers.get("content-range")) };
 }

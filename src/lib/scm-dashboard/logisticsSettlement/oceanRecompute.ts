@@ -1,6 +1,20 @@
 import { allocateOceanSettlement } from "./oceanAllocation";
-import { getSupabaseRestEnv, supabaseGetAll, supabaseUpsertRows } from "./supabaseRest";
-import type { GlobalMoveLine, OceanAllocationRow, OceanSettlementLine, SkuMaster, UnitPrice } from "./types";
+import {
+  buildMonthlyRows,
+  buildOceanEtlRunLogRow,
+  planOceanCleanup,
+  summarizeAllocation,
+  toMartDocRow,
+  type OceanCleanupPlan,
+} from "./oceanMart";
+import {
+  getSupabaseRestEnv,
+  supabaseCount,
+  supabaseDelete,
+  supabaseGetAll,
+  supabaseUpsertRows,
+} from "./supabaseRest";
+import type { GlobalMoveLine, OceanSettlementLine, SkuMaster, UnitPrice } from "./types";
 import { queryBoostersScmReadOnly } from "../mysqlPools";
 
 export type OceanRecomputeOptions = {
@@ -30,6 +44,16 @@ export type OceanRecomputeSummary = {
     otherKrw: number;
   };
   warningSamples: unknown[];
+  // Stale-row cleanup: in dry-run the counts are rows that WOULD be replaced;
+  // in apply they are rows actually deleted. Skipped (eligible=false) for partial runs.
+  cleanup: {
+    eligible: boolean;
+    reason: string | null;
+    scope: "month" | "all";
+    month: string | null;
+    martRowsAffected: number;
+    monthlyRowsAffected: number;
+  };
   written?: {
     mart: { written: number };
     monthly: { written: number };
@@ -53,13 +77,10 @@ type OceanSettlementSupabaseRow = {
   file_id: string | null;
 };
 
-type MartDocRow = Record<string, string | number | null>;
-type MonthlySkuRow = Record<string, string | number | null>;
-
-const PIPELINE = "logistics_settlement_ocean_v1";
-
 export async function runOceanRecompute(options: OceanRecomputeOptions): Promise<OceanRecomputeSummary> {
-  const supabase = getSupabaseRestEnv({ requireServiceRole: options.apply });
+  // Ocean settlement reads always require the service role (see commit aab1fe1); the
+  // apply flag only gates the mart writes below, not the staging read credential.
+  const supabase = getSupabaseRestEnv({ requireServiceRole: true });
   const [moves, settlement, skuMasters, unitPrices] = await Promise.all([
     fetchOceanMoveLines(options),
     fetchOceanSettlementRows(supabase, options),
@@ -72,6 +93,7 @@ export async function runOceanRecompute(options: OceanRecomputeOptions): Promise
   const monthlyRows = buildMonthlyRows(allocation.rows, options.etlRunId);
   const bls = new Set(allocation.rows.map((row) => row.blNo).filter(Boolean));
   const skus = new Set(allocation.rows.map((row) => row.resourceCode).filter(Boolean));
+  const cleanupPlan = planOceanCleanup(options);
   const summary: OceanRecomputeSummary = {
     mode: options.apply ? "apply" : "dry-run",
     etlRunId: options.etlRunId,
@@ -87,29 +109,61 @@ export async function runOceanRecompute(options: OceanRecomputeOptions): Promise
     affectedSkuCount: skus.size,
     totals: summarizeAllocation(allocation.rows),
     warningSamples: allocation.warnings.slice(0, 20),
+    cleanup: {
+      eligible: cleanupPlan.eligible,
+      reason: cleanupPlan.reason,
+      scope: cleanupPlan.scope,
+      month: cleanupPlan.month,
+      martRowsAffected: 0,
+      monthlyRowsAffected: 0,
+    },
   };
 
-  if (!options.apply) return summary;
+  if (!options.apply) {
+    if (cleanupPlan.eligible) {
+      // Preview how many stale ocean_v1 rows the apply would replace in the target scope.
+      const [martRowsAffected, monthlyRowsAffected] = await Promise.all([
+        supabaseCount(supabase, "mart_logistics_doc_analysis", cleanupFilters("settlement_month", cleanupPlan)),
+        supabaseCount(supabase, "mart_logistics_monthly_sku_cost", cleanupFilters("month", cleanupPlan)),
+      ]);
+      summary.cleanup.martRowsAffected = martRowsAffected;
+      summary.cleanup.monthlyRowsAffected = monthlyRowsAffected;
+    }
+    return summary;
+  }
 
   const mart = await supabaseUpsertRows(supabase, "mart_logistics_doc_analysis", "raw_key", martRows);
   const monthly = await supabaseUpsertRows(supabase, "mart_logistics_monthly_sku_cost", "raw_key", monthlyRows);
   const log = await supabaseUpsertRows(supabase, "etl_run_logs", "etl_run_id", [
-    {
-      etl_run_id: options.etlRunId,
-      pipeline: PIPELINE,
-      status: "SUCCESS",
-      snapshot_date: null,
-      finished_at: new Date().toISOString(),
-      source_rows: moves.length,
-      raw_rows: settlement.length,
-      mart_lot_rows: martRows.length,
-      mart_sku_rows: monthlyRows.length,
+    buildOceanEtlRunLogRow({
+      etlRunId: options.etlRunId,
+      movementRowCount: moves.length,
+      settlementRowCount: settlement.length,
+      martRowCount: martRows.length,
+      monthlyRowCount: monthlyRows.length,
       summary,
-      error_message: null,
-    },
+    }),
   ]);
 
+  if (cleanupPlan.eligible) {
+    // Delete-after-upsert: remove stale rows in the target scope EXCEPT the ones this run
+    // just wrote (etl_run_id != current), so the current data is never at risk.
+    const [martDeleted, monthlyDeleted] = await Promise.all([
+      supabaseDelete(supabase, "mart_logistics_doc_analysis", cleanupFilters("settlement_month", cleanupPlan, options.etlRunId)),
+      supabaseDelete(supabase, "mart_logistics_monthly_sku_cost", cleanupFilters("month", cleanupPlan, options.etlRunId)),
+    ]);
+    summary.cleanup.martRowsAffected = martDeleted.deleted;
+    summary.cleanup.monthlyRowsAffected = monthlyDeleted.deleted;
+  }
+
   return { ...summary, written: { mart, monthly, log } };
+}
+
+function cleanupFilters(monthColumn: string, plan: OceanCleanupPlan, excludeEtlRunId?: string) {
+  const params = new URLSearchParams({ allocation_rule_version: "eq.ocean_v1" });
+  if (plan.scope === "month" && plan.month) params.set(monthColumn, `eq.${plan.month}`);
+  if (excludeEtlRunId) params.set("etl_run_id", `neq.${excludeEtlRunId}`);
+  return params;
 }
 
 async function fetchOceanMoveLines(options: OceanRecomputeOptions): Promise<GlobalMoveLine[]> {
@@ -162,7 +216,11 @@ async function fetchOceanSettlementRows(env: { url: string; apiKey: string }, op
     select: "raw_key,invoice_date,bl_no,country,charge_type,currency,amount_orig,exrate,amount_krw,tax_krw,container_type,file_name,file_id",
     order: "bl_no.asc,invoice_date.asc,raw_key.asc",
   });
-  if (options.month) params.set("invoice_date", `gte.${options.month}-01`);
+  if (options.month) {
+    // Bound the month server-side (gte month-01 AND lt next-month-01) instead of an
+    // open-ended gte that pulls every later month across the network.
+    params.set("and", `(invoice_date.gte.${options.month}-01,invoice_date.lt.${firstDayOfNextMonth(options.month)})`);
+  }
   const rows = await supabaseGetAll<OceanSettlementSupabaseRow>(env, "stg_settlement_ocean_lines", params);
   return rows
     .filter((row) => !options.month || String(row.invoice_date ?? "").startsWith(options.month))
@@ -212,148 +270,11 @@ async function fetchUnitPrices(): Promise<UnitPrice[]> {
   }));
 }
 
-function toMartDocRow(row: OceanAllocationRow, etlRunId: string): MartDocRow {
-  return {
-    raw_key: row.rawKey,
-    source_line_id: row.sourceLineId,
-    invoice_no: row.invoiceNo,
-    bl_no: row.blNo,
-    carrier: row.carrier,
-    carrier_mode: row.carrierMode,
-    ship_date: row.shipDate,
-    settlement_month: row.settlementMonth,
-    from_warehouse: row.fromWarehouse,
-    to_warehouse: row.toWarehouse,
-    resource_code: row.resourceCode,
-    resource_name: row.resourceName,
-    qty_ea: row.qtyEa,
-    qty_ctn: row.qtyCtn,
-    weight_ratio_pct: row.weightRatioPct,
-    value_ratio_pct: row.valueRatioPct,
-    invoice_total_logistics_krw: row.invoiceTotalLogisticsKrw,
-    invoice_total_freight_krw: row.invoiceTotalFreightKrw,
-    invoice_total_duty_krw: row.invoiceTotalDutyKrw,
-    invoice_total_other_krw: row.invoiceTotalOtherKrw,
-    sku_logistics_alloc_krw: row.skuLogisticsAllocKrw,
-    sku_logistics_unit_krw: row.skuLogisticsUnitKrw,
-    sku_freight_unit_krw: row.skuFreightUnitKrw,
-    sku_duty_unit_krw: row.skuDutyUnitKrw,
-    sku_other_unit_krw: row.skuOtherUnitKrw,
-    container_type: row.containerType,
-    allocation_rule_version: row.allocationRuleVersion,
-    etl_run_id: etlRunId,
-  };
-}
-
-function buildMonthlyRows(rows: OceanAllocationRow[], etlRunId: string): MonthlySkuRow[] {
-  const byKey = new Map<string, {
-    month: string;
-    carrierMode: string;
-    resourceCode: string;
-    resourceName: string;
-    qtyEa: number;
-    qtyCtn: number;
-    skuLogisticsAllocKrw: number;
-    skuFreightAllocKrw: number;
-    skuDutyAllocKrw: number;
-    skuOtherAllocKrw: number;
-    bls: Set<string>;
-    invoices: Set<string>;
-    totalsByBl: Map<string, Pick<OceanAllocationRow, "invoiceTotalLogisticsKrw" | "invoiceTotalFreightKrw" | "invoiceTotalDutyKrw" | "invoiceTotalOtherKrw">>;
-  }>();
-
-  for (const row of rows) {
-    const key = `${row.settlementMonth}:${row.carrierMode}:${row.resourceCode}`;
-    const current = byKey.get(key) ?? {
-      month: row.settlementMonth,
-      carrierMode: row.carrierMode,
-      resourceCode: row.resourceCode,
-      resourceName: row.resourceName,
-      qtyEa: 0,
-      qtyCtn: 0,
-      skuLogisticsAllocKrw: 0,
-      skuFreightAllocKrw: 0,
-      skuDutyAllocKrw: 0,
-      skuOtherAllocKrw: 0,
-      bls: new Set<string>(),
-      invoices: new Set<string>(),
-      totalsByBl: new Map(),
-    };
-    current.qtyEa += row.qtyEa;
-    current.qtyCtn += row.qtyCtn;
-    current.skuLogisticsAllocKrw += row.skuLogisticsAllocKrw;
-    current.skuFreightAllocKrw += row.skuFreightUnitKrw * row.qtyEa;
-    current.skuDutyAllocKrw += row.skuDutyUnitKrw * row.qtyEa;
-    current.skuOtherAllocKrw += row.skuOtherUnitKrw * row.qtyEa;
-    if (row.blNo) current.bls.add(row.blNo);
-    if (row.invoiceNo) current.invoices.add(row.invoiceNo);
-    if (row.blNo && !current.totalsByBl.has(row.blNo)) {
-      current.totalsByBl.set(row.blNo, {
-        invoiceTotalLogisticsKrw: row.invoiceTotalLogisticsKrw,
-        invoiceTotalFreightKrw: row.invoiceTotalFreightKrw,
-        invoiceTotalDutyKrw: row.invoiceTotalDutyKrw,
-        invoiceTotalOtherKrw: row.invoiceTotalOtherKrw,
-      });
-    }
-    byKey.set(key, current);
-  }
-
-  return Array.from(byKey.values()).map((row) => {
-    const totals = Array.from(row.totalsByBl.values()).reduce(
-      (acc, total) => ({
-        logistics: acc.logistics + total.invoiceTotalLogisticsKrw,
-        freight: acc.freight + total.invoiceTotalFreightKrw,
-        duty: acc.duty + total.invoiceTotalDutyKrw,
-        other: acc.other + total.invoiceTotalOtherKrw,
-      }),
-      { logistics: 0, freight: 0, duty: 0, other: 0 },
-    );
-    return {
-      raw_key: `${row.month}:${row.carrierMode}:${row.resourceCode}`,
-      month: row.month,
-      carrier_mode: row.carrierMode,
-      resource_code: row.resourceCode,
-      resource_name: row.resourceName,
-      qty_ea: row.qtyEa,
-      qty_ctn: row.qtyCtn,
-      bl_count: row.bls.size,
-      invoice_count: row.invoices.size,
-      monthly_total_logistics_krw: totals.logistics,
-      monthly_total_freight_krw: totals.freight,
-      monthly_total_duty_krw: totals.duty,
-      monthly_total_other_krw: totals.other,
-      sku_logistics_alloc_krw: row.skuLogisticsAllocKrw,
-      sku_logistics_unit_krw: row.qtyEa > 0 ? row.skuLogisticsAllocKrw / row.qtyEa : 0,
-      sku_freight_unit_krw: row.qtyEa > 0 ? row.skuFreightAllocKrw / row.qtyEa : 0,
-      sku_duty_unit_krw: row.qtyEa > 0 ? row.skuDutyAllocKrw / row.qtyEa : 0,
-      sku_other_unit_krw: row.qtyEa > 0 ? row.skuOtherAllocKrw / row.qtyEa : 0,
-      allocation_rule_version: "ocean_v1",
-      etl_run_id: etlRunId,
-    };
-  });
-}
-
-function summarizeAllocation(rows: OceanAllocationRow[]) {
-  const totalsByBl = new Map<string, Pick<OceanAllocationRow, "invoiceTotalLogisticsKrw" | "invoiceTotalFreightKrw" | "invoiceTotalDutyKrw" | "invoiceTotalOtherKrw">>();
-  for (const row of rows) {
-    if (!totalsByBl.has(row.blNo)) {
-      totalsByBl.set(row.blNo, {
-        invoiceTotalLogisticsKrw: row.invoiceTotalLogisticsKrw,
-        invoiceTotalFreightKrw: row.invoiceTotalFreightKrw,
-        invoiceTotalDutyKrw: row.invoiceTotalDutyKrw,
-        invoiceTotalOtherKrw: row.invoiceTotalOtherKrw,
-      });
-    }
-  }
-  return Array.from(totalsByBl.values()).reduce(
-    (acc, row) => ({
-      logisticsKrw: acc.logisticsKrw + row.invoiceTotalLogisticsKrw,
-      freightKrw: acc.freightKrw + row.invoiceTotalFreightKrw,
-      dutyKrw: acc.dutyKrw + row.invoiceTotalDutyKrw,
-      otherKrw: acc.otherKrw + row.invoiceTotalOtherKrw,
-    }),
-    { logisticsKrw: 0, freightKrw: 0, dutyKrw: 0, otherKrw: 0 },
-  );
+function firstDayOfNextMonth(month: string) {
+  const [year, monthNo] = month.split("-").map((part) => Number(part));
+  const nextYear = monthNo >= 12 ? year + 1 : year;
+  const nextMonth = monthNo >= 12 ? 1 : monthNo + 1;
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
 }
 
 function stringValue(value: unknown) {

@@ -360,8 +360,8 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
   const [result, setResult] = useState<unknown>(null);
   const [jobError, setJobError] = useState<string | null>(null);
 
-  async function runJob(endpoint: string, body?: Record<string, unknown>) {
-    setIsRunning(endpoint);
+  async function runJob(endpoint: string, body?: Record<string, unknown>, runKey: string = endpoint) {
+    setIsRunning(runKey);
     setJobError(null);
     try {
       const response = await fetch(endpoint, body
@@ -407,7 +407,7 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
           M1 운영 기준은 Supabase DB입니다. 과거 Sheet 데이터는 관리자 CLI로 bootstrap하고, 웹은 staging/mart 현황 확인·재계산·검증만 수행합니다. 향후 신규 정산서는 Google Drive 보관소로 적재한 뒤 Drive source registry를 통해 검색/적재/분석합니다.
         </div>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <JobActionCard
           title="1. DB 적재 현황"
           description="Supabase stg_settlement_ocean_lines 기준 row/BL/file/금액 현황을 확인합니다."
@@ -417,16 +417,24 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
           onClick={() => void runJob("/api/logistics-settlement/jobs/staging-status")}
         />
         <JobActionCard
-          title="2. SKU 배부 재계산"
-          description="해상 이동 원장과 Supabase staging을 이용해 doc_analysis/monthly mart를 재계산합니다."
-          button="재계산 적용"
+          title="2. 재계산 미리보기"
+          description="쓰기 없이 dry-run으로 배부 결과와 교체될 stale mart 행 수(cleanup)를 미리 확인합니다."
+          button="미리보기 (dry-run)"
           disabled={Boolean(isRunning)}
-          running={isRunning === "/api/logistics-settlement/jobs/recompute"}
-          tone="warn"
-          onClick={() => void runJob("/api/logistics-settlement/jobs/recompute", { ...scope, apply: true, confirmation: "APPLY_OCEAN_RECOMPUTE" })}
+          running={isRunning === "recompute:dry-run"}
+          onClick={() => void runJob("/api/logistics-settlement/jobs/recompute", { ...scope, apply: false }, "recompute:dry-run")}
         />
         <JobActionCard
-          title="3. 검증"
+          title="3. SKU 배부 재계산"
+          description="doc_analysis/monthly mart를 재계산하고 대상 범위의 stale 행을 교체합니다. 적용 전 미리보기로 확인하세요."
+          button="재계산 적용"
+          disabled={Boolean(isRunning)}
+          running={isRunning === "recompute:apply"}
+          tone="warn"
+          onClick={() => void runJob("/api/logistics-settlement/jobs/recompute", { ...scope, apply: true, confirmation: "APPLY_OCEAN_RECOMPUTE" }, "recompute:apply")}
+        />
+        <JobActionCard
+          title="4. 검증"
           description="원천/이동/배부 row와 warning을 PASS/WARN/FAIL로 확인합니다."
           button="검증 실행"
           disabled={Boolean(isRunning)}
@@ -434,7 +442,7 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
           onClick={() => void runJob("/api/logistics-settlement/jobs/validate", scope)}
         />
         <JobActionCard
-          title="4. 결과 새로고침"
+          title="5. 결과 새로고침"
           description="재계산 후 SKU 배부 분석, 해상_정산 원천, 월별 SKU 단가 탭을 다시 불러옵니다."
           button="화면 새로고침"
           disabled={Boolean(isRunning)}

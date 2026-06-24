@@ -65,6 +65,10 @@ export type OceanAllocationRow = {
   invoiceTotalDutyKrw: number;
   invoiceTotalOtherKrw: number;
   skuLogisticsAllocKrw: number;
+  // Integer per-row bucket allocations (sum == skuLogisticsAllocKrw); used for exact monthly rollup.
+  skuFreightKrw: number;
+  skuDutyKrw: number;
+  skuOtherKrw: number;
   skuLogisticsUnitKrw: number;
   skuFreightUnitKrw: number;
   skuDutyUnitKrw: number;
@@ -80,7 +84,9 @@ export type OceanAllocationWarning = {
     | "MISSING_UNIT_PRICE"
     | "NO_BL"
     | "FALLBACK_QTY_WEIGHT"
-    | "FALLBACK_QTY_DUTY";
+    | "FALLBACK_QTY_DUTY"
+    | "MISSING_DUTY_FX"
+    | "MISSING_DUTY_AMOUNT";
   blNo: string;
   resourceCode?: string;
   message: string;

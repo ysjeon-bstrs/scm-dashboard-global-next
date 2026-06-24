@@ -2,13 +2,21 @@ import * as mysql from "mysql2/promise";
 
 import { allocateOceanSettlement } from "../../../src/lib/scm-dashboard/logisticsSettlement/oceanAllocation.ts";
 import {
+  buildMonthlyRows,
+  buildOceanEtlRunLogRow,
+  OCEAN_PIPELINE,
+  summarizeAllocation,
+  toMartDocRow,
+  type MartDocRow,
+  type MonthlySkuRow,
+} from "../../../src/lib/scm-dashboard/logisticsSettlement/oceanMart.ts";
+import {
   getSupabaseRestEnv,
   supabaseGetAll,
   supabaseUpsertRows,
 } from "../../../src/lib/scm-dashboard/logisticsSettlement/supabaseRest.ts";
 import type {
   GlobalMoveLine,
-  OceanAllocationRow,
   OceanSettlementLine,
   SkuMaster,
   UnitPrice,
@@ -44,11 +52,6 @@ type OceanSettlementSupabaseRow = {
   file_name: string | null;
   file_id: string | null;
 };
-
-type MartDocRow = Record<string, string | number | null>;
-type MonthlySkuRow = Record<string, string | number | null>;
-
-const PIPELINE = "logistics_settlement_ocean_v1";
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -101,6 +104,8 @@ async function main() {
   const writeResult = await applyToSupabase(supabase, martRows, monthlyRows, {
     etlRunId,
     report,
+    movementRowCount: moves.length,
+    settlementRowCount: settlement.length,
   });
   console.log(JSON.stringify({ status: "SUCCESS", ...writeResult }, null, 2));
 }
@@ -326,179 +331,30 @@ function moneyValue(value: number | string | null | undefined) {
   return numberValue(cleaned);
 }
 
-function toMartDocRow(row: OceanAllocationRow, etlRunId: string): MartDocRow {
-  return {
-    raw_key: row.rawKey,
-    source_line_id: row.sourceLineId,
-    invoice_no: row.invoiceNo,
-    bl_no: row.blNo,
-    carrier: row.carrier,
-    carrier_mode: row.carrierMode,
-    ship_date: row.shipDate,
-    settlement_month: row.settlementMonth,
-    from_warehouse: row.fromWarehouse,
-    to_warehouse: row.toWarehouse,
-    resource_code: row.resourceCode,
-    resource_name: row.resourceName,
-    qty_ea: row.qtyEa,
-    qty_ctn: row.qtyCtn,
-    weight_ratio_pct: row.weightRatioPct,
-    value_ratio_pct: row.valueRatioPct,
-    invoice_total_logistics_krw: row.invoiceTotalLogisticsKrw,
-    invoice_total_freight_krw: row.invoiceTotalFreightKrw,
-    invoice_total_duty_krw: row.invoiceTotalDutyKrw,
-    invoice_total_other_krw: row.invoiceTotalOtherKrw,
-    sku_logistics_alloc_krw: row.skuLogisticsAllocKrw,
-    sku_logistics_unit_krw: row.skuLogisticsUnitKrw,
-    sku_freight_unit_krw: row.skuFreightUnitKrw,
-    sku_duty_unit_krw: row.skuDutyUnitKrw,
-    sku_other_unit_krw: row.skuOtherUnitKrw,
-    container_type: row.containerType,
-    allocation_rule_version: row.allocationRuleVersion,
-    etl_run_id: etlRunId,
-  };
-}
-
-function buildMonthlyRows(rows: OceanAllocationRow[], etlRunId: string): MonthlySkuRow[] {
-  const byKey = new Map<string, {
-    month: string;
-    carrierMode: string;
-    resourceCode: string;
-    resourceName: string;
-    qtyEa: number;
-    qtyCtn: number;
-    skuLogisticsAllocKrw: number;
-    skuFreightAllocKrw: number;
-    skuDutyAllocKrw: number;
-    skuOtherAllocKrw: number;
-    bls: Set<string>;
-    invoices: Set<string>;
-    totalsByBl: Map<string, Pick<OceanAllocationRow, "invoiceTotalLogisticsKrw" | "invoiceTotalFreightKrw" | "invoiceTotalDutyKrw" | "invoiceTotalOtherKrw">>;
-  }>();
-
-  for (const row of rows) {
-    const key = `${row.settlementMonth}:${row.carrierMode}:${row.resourceCode}`;
-    const current = byKey.get(key) ?? {
-      month: row.settlementMonth,
-      carrierMode: row.carrierMode,
-      resourceCode: row.resourceCode,
-      resourceName: row.resourceName,
-      qtyEa: 0,
-      qtyCtn: 0,
-      skuLogisticsAllocKrw: 0,
-      skuFreightAllocKrw: 0,
-      skuDutyAllocKrw: 0,
-      skuOtherAllocKrw: 0,
-      bls: new Set<string>(),
-      invoices: new Set<string>(),
-      totalsByBl: new Map(),
-    };
-    current.qtyEa += row.qtyEa;
-    current.qtyCtn += row.qtyCtn;
-    current.skuLogisticsAllocKrw += row.skuLogisticsAllocKrw;
-    current.skuFreightAllocKrw += row.skuFreightUnitKrw * row.qtyEa;
-    current.skuDutyAllocKrw += row.skuDutyUnitKrw * row.qtyEa;
-    current.skuOtherAllocKrw += row.skuOtherUnitKrw * row.qtyEa;
-    if (row.blNo) current.bls.add(row.blNo);
-    if (row.invoiceNo) current.invoices.add(row.invoiceNo);
-    if (row.blNo && !current.totalsByBl.has(row.blNo)) {
-      current.totalsByBl.set(row.blNo, {
-        invoiceTotalLogisticsKrw: row.invoiceTotalLogisticsKrw,
-        invoiceTotalFreightKrw: row.invoiceTotalFreightKrw,
-        invoiceTotalDutyKrw: row.invoiceTotalDutyKrw,
-        invoiceTotalOtherKrw: row.invoiceTotalOtherKrw,
-      });
-    }
-    byKey.set(key, current);
-  }
-
-  return Array.from(byKey.values()).map((row) => {
-    const totals = Array.from(row.totalsByBl.values()).reduce(
-      (acc, total) => ({
-        logistics: acc.logistics + total.invoiceTotalLogisticsKrw,
-        freight: acc.freight + total.invoiceTotalFreightKrw,
-        duty: acc.duty + total.invoiceTotalDutyKrw,
-        other: acc.other + total.invoiceTotalOtherKrw,
-      }),
-      { logistics: 0, freight: 0, duty: 0, other: 0 },
-    );
-    return {
-      raw_key: `${row.month}:${row.carrierMode}:${row.resourceCode}`,
-      month: row.month,
-      carrier_mode: row.carrierMode,
-      resource_code: row.resourceCode,
-      resource_name: row.resourceName,
-      qty_ea: row.qtyEa,
-      qty_ctn: row.qtyCtn,
-      bl_count: row.bls.size,
-      invoice_count: row.invoices.size,
-      monthly_total_logistics_krw: totals.logistics,
-      monthly_total_freight_krw: totals.freight,
-      monthly_total_duty_krw: totals.duty,
-      monthly_total_other_krw: totals.other,
-      sku_logistics_alloc_krw: row.skuLogisticsAllocKrw,
-      sku_logistics_unit_krw: row.qtyEa > 0 ? row.skuLogisticsAllocKrw / row.qtyEa : 0,
-      sku_freight_unit_krw: row.qtyEa > 0 ? row.skuFreightAllocKrw / row.qtyEa : 0,
-      sku_duty_unit_krw: row.qtyEa > 0 ? row.skuDutyAllocKrw / row.qtyEa : 0,
-      sku_other_unit_krw: row.qtyEa > 0 ? row.skuOtherAllocKrw / row.qtyEa : 0,
-      allocation_rule_version: "ocean_v1",
-      etl_run_id: etlRunId,
-    };
-  });
-}
-
-function summarizeAllocation(rows: OceanAllocationRow[]) {
-  const totalsByBl = new Map<string, Pick<OceanAllocationRow, "invoiceTotalLogisticsKrw" | "invoiceTotalFreightKrw" | "invoiceTotalDutyKrw" | "invoiceTotalOtherKrw">>();
-  for (const row of rows) {
-    if (!totalsByBl.has(row.blNo)) {
-      totalsByBl.set(row.blNo, {
-        invoiceTotalLogisticsKrw: row.invoiceTotalLogisticsKrw,
-        invoiceTotalFreightKrw: row.invoiceTotalFreightKrw,
-        invoiceTotalDutyKrw: row.invoiceTotalDutyKrw,
-        invoiceTotalOtherKrw: row.invoiceTotalOtherKrw,
-      });
-    }
-  }
-  return Array.from(totalsByBl.values()).reduce(
-    (acc, row) => ({
-      logisticsKrw: acc.logisticsKrw + row.invoiceTotalLogisticsKrw,
-      freightKrw: acc.freightKrw + row.invoiceTotalFreightKrw,
-      dutyKrw: acc.dutyKrw + row.invoiceTotalDutyKrw,
-      otherKrw: acc.otherKrw + row.invoiceTotalOtherKrw,
-    }),
-    { logisticsKrw: 0, freightKrw: 0, dutyKrw: 0, otherKrw: 0 },
-  );
-}
-
 async function applyToSupabase(
   env: { url: string; apiKey: string },
   martRows: MartDocRow[],
   monthlyRows: MonthlySkuRow[],
-  context: { etlRunId: string; report: unknown },
+  context: { etlRunId: string; report: unknown; movementRowCount: number; settlementRowCount: number },
 ) {
   const mart = await supabaseUpsertRows(env, "mart_logistics_doc_analysis", "raw_key", martRows);
   const monthly = await supabaseUpsertRows(env, "mart_logistics_monthly_sku_cost", "raw_key", monthlyRows);
   const log = await supabaseUpsertRows(env, "etl_run_logs", "etl_run_id", [
-    {
-      etl_run_id: context.etlRunId,
-      pipeline: PIPELINE,
-      status: "SUCCESS",
-      snapshot_date: null,
-      finished_at: new Date().toISOString(),
-      source_rows: martRows.length,
-      raw_rows: martRows.length,
-      mart_lot_rows: monthlyRows.length,
-      mart_sku_rows: monthlyRows.length,
+    buildOceanEtlRunLogRow({
+      etlRunId: context.etlRunId,
+      movementRowCount: context.movementRowCount,
+      settlementRowCount: context.settlementRowCount,
+      martRowCount: martRows.length,
+      monthlyRowCount: monthlyRows.length,
       summary: context.report,
-      error_message: null,
-    },
+    }),
   ]);
   return { mart, monthly, log };
 }
 
 function buildEtlRunId() {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  return `${PIPELINE}_${stamp}`;
+  return `${OCEAN_PIPELINE}_${stamp}`;
 }
 
 main().catch((error) => {
