@@ -20,6 +20,17 @@ export function getSupabaseRestEnv(options: { requireServiceRole?: boolean } = {
   return { url, apiKey };
 }
 
+/**
+ * Build an error for a failed Supabase REST call. The full response body (which can
+ * leak PostgREST internals: column names, constraints, hints) is logged server-side
+ * only; the thrown message is bounded to the action/table/status.
+ */
+async function supabaseError(action: string, table: string, response: Response): Promise<Error> {
+  const body = await response.text().catch(() => "");
+  console.error(`[supabase] ${action} ${table} failed: ${response.status} ${body}`);
+  return new Error(`Supabase ${action} failed for ${table} (${response.status})`);
+}
+
 export async function supabaseUpsertRows<T extends SupabaseRecord>(
   env: SupabaseEnv,
   table: string,
@@ -40,7 +51,7 @@ export async function supabaseUpsertRows<T extends SupabaseRecord>(
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase upsert failed for ${table}: ${response.status} ${await response.text()}`);
+    throw await supabaseError("upsert", table, response);
   }
 
   return { written: rows.length };
@@ -68,7 +79,7 @@ export async function supabaseGetAll<T>(env: SupabaseEnv, table: string, query: 
     });
 
     if (!response.ok) {
-      throw new Error(`Supabase read failed for ${table}: ${response.status} ${await response.text()}`);
+      throw await supabaseError("read", table, response);
     }
 
     const page = (await response.json()) as T[];
@@ -96,7 +107,7 @@ export async function supabaseCount(env: SupabaseEnv, table: string, filters: UR
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase count failed for ${table}: ${response.status} ${await response.text()}`);
+    throw await supabaseError("count", table, response);
   }
 
   return totalFromContentRange(response.headers.get("content-range"));
@@ -118,7 +129,7 @@ export async function supabaseDelete(env: SupabaseEnv, table: string, filters: U
   });
 
   if (!response.ok) {
-    throw new Error(`Supabase delete failed for ${table}: ${response.status} ${await response.text()}`);
+    throw await supabaseError("delete", table, response);
   }
 
   return { deleted: totalFromContentRange(response.headers.get("content-range")) };

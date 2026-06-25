@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Banner,
   BrandMark,
+  Collapsible,
   PageHeader,
   Panel,
   PanelHeader,
   Stat,
   StatusPill,
+  type Tone,
 } from "@/components/scm-dashboard/ui";
 import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser";
 import type {
@@ -110,7 +112,9 @@ export default function OceanSettlementClient({
   const [blFilter, setBlFilter] = useState("");
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestId = useRef(0);
 
   const authMessage = useMemo(() => {
     if (initialAuthError === "forbidden-domain") return "boosters.kr Google 계정만 접근할 수 있습니다.";
@@ -120,18 +124,27 @@ export default function OceanSettlementClient({
 
   const loadSummary = useCallback(async () => {
     if (authMessage) return;
+    // Race guard: only the most recently started load may commit state, so a slow
+    // earlier request (or recompute's auto-refresh) can't overwrite newer data.
+    const requestId = loadRequestId.current + 1;
+    loadRequestId.current = requestId;
     setIsLoading(true);
     setError(null);
     try {
       const response = await fetch("/api/logistics-settlement/summary?limit=5000", { cache: "no-store" });
       const payload = await response.json();
+      if (requestId !== loadRequestId.current) return;
       if (!response.ok) throw new Error(payload.error ?? "정산 분석 데이터를 불러오지 못했습니다.");
       setSummary(payload as LogisticsSettlementSummary);
     } catch (err) {
+      if (requestId !== loadRequestId.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
       setSummary(emptySummary);
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestId.current) {
+        setIsLoading(false);
+        setHasLoaded(true);
+      }
     }
   }, [authMessage]);
 
@@ -280,7 +293,7 @@ export default function OceanSettlementClient({
               <Link className="btn btn-secondary" href="/global/scm-dashboard">
                 SCM Dashboard
               </Link>
-              <button className="btn btn-primary" disabled={isLoading} onClick={() => void loadSummary()}>
+              <button className="btn btn-primary" disabled={isLoading} aria-busy={isLoading} onClick={() => void loadSummary()}>
                 {isLoading ? "새로고침 중" : "새로고침"}
               </button>
             </>
@@ -288,6 +301,7 @@ export default function OceanSettlementClient({
         />
 
         {error ? <Banner tone="danger">{error}</Banner> : null}
+        {isLoading && !hasLoaded ? <Banner>정산 데이터를 불러오는 중…</Banner> : null}
 
         <Panel>
           <div className="grid gap-3 lg:grid-cols-[9rem_9rem_9rem_9rem_12rem_1fr_auto] lg:items-end">
@@ -311,6 +325,7 @@ export default function OceanSettlementClient({
               <span className="field-label">검색</span>
               <input
                 className="input mt-1 w-full"
+                aria-label="발송/정산 행 검색"
                 placeholder="Invoice, BL, SKU, 상품명, 창고 검색"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -359,10 +374,12 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
   const [isRunning, setIsRunning] = useState<string | null>(null);
   const [result, setResult] = useState<unknown>(null);
   const [jobError, setJobError] = useState<string | null>(null);
+  const [confirmingApply, setConfirmingApply] = useState(false);
 
   async function runJob(endpoint: string, body?: Record<string, unknown>, runKey: string = endpoint) {
     setIsRunning(runKey);
     setJobError(null);
+    setResult(null);
     try {
       const response = await fetch(endpoint, body
         ? {
@@ -397,11 +414,11 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
       <div className="grid gap-3 lg:grid-cols-[10rem_10rem_1fr] lg:items-end">
         <label className="block">
           <span className="field-label">정산월/출고월</span>
-          <input className="input mt-1 w-full" placeholder="YYYY-MM" value={month} onChange={(event) => setMonth(event.target.value)} />
+          <input className="input mt-1 w-full" aria-label="정산월/출고월 (YYYY-MM)" inputMode="numeric" placeholder="YYYY-MM" value={month} onChange={(event) => setMonth(event.target.value)} />
         </label>
         <label className="block">
           <span className="field-label">테스트 limit</span>
-          <input className="input mt-1 w-full" value={limit} onChange={(event) => setLimit(event.target.value)} />
+          <input className="input mt-1 w-full" aria-label="테스트 limit (행 수)" inputMode="numeric" value={limit} onChange={(event) => setLimit(event.target.value)} />
         </label>
         <div className="text-xs leading-5 text-faint">
           M1 운영 기준은 Supabase DB입니다. 과거 Sheet 데이터는 관리자 CLI로 bootstrap하고, 웹은 staging/mart 현황 확인·재계산·검증만 수행합니다. 향후 신규 정산서는 Google Drive 보관소로 적재한 뒤 Drive source registry를 통해 검색/적재/분석합니다.
@@ -431,7 +448,7 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
           disabled={Boolean(isRunning)}
           running={isRunning === "recompute:apply"}
           tone="warn"
-          onClick={() => void runJob("/api/logistics-settlement/jobs/recompute", { ...scope, apply: true, confirmation: "APPLY_OCEAN_RECOMPUTE" }, "recompute:apply")}
+          onClick={() => setConfirmingApply(true)}
         />
         <JobActionCard
           title="4. 검증"
@@ -450,16 +467,156 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
           onClick={onRefresh}
         />
       </div>
-      {jobError ? <Banner tone="danger">{jobError}</Banner> : null}
-      {result ? (
-        <div className="mt-4 rounded-xl border border-line bg-surface-muted p-4">
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
-            최근 작업 결과
+      {confirmingApply ? (
+        <div className="mt-4 rounded-xl bg-warn-soft px-4 py-3 text-sm text-warn-ink">
+          <p className="font-semibold">재계산을 적용할까요?</p>
+          <p className="mt-1 leading-6">
+            {scope.month ? `${scope.month} ` : "전체 "}범위의 doc_analysis/monthly mart를 덮어쓰고 대상 범위의 stale 행을 삭제합니다.
+            {scope.limit ? " (limit 지정 → 부분 실행이라 stale 정리는 건너뜁니다.)" : ""} 적용 전 “미리보기”로 영향 범위를 확인하세요.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={Boolean(isRunning)}
+              onClick={() => {
+                setConfirmingApply(false);
+                void runJob("/api/logistics-settlement/jobs/recompute", { ...scope, apply: true, confirmation: "APPLY_OCEAN_RECOMPUTE" }, "recompute:apply");
+              }}
+            >
+              적용 실행
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirmingApply(false)}>
+              취소
+            </button>
           </div>
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs leading-5 text-muted">{JSON.stringify(result, null, 2)}</pre>
         </div>
       ) : null}
+      {jobError ? <Banner tone="danger">{jobError}</Banner> : null}
+      {result ? <JobResultView result={result} /> : null}
     </Panel>
+  );
+}
+
+type LooseRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): LooseRecord {
+  return value && typeof value === "object" ? (value as LooseRecord) : {};
+}
+
+function asNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+const JOB_STATUS_TONE: Record<string, Tone> = {
+  SUCCEEDED: "ok",
+  SUCCEEDED_WITH_WARNINGS: "warn",
+  FAILED: "danger",
+  BLOCKED: "warn",
+};
+
+const CHECK_TONE: Record<string, Tone> = { PASS: "ok", WARN: "warn", FAIL: "danger" };
+
+function Metric({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-lg bg-surface px-3 py-2">
+      <p className="text-[0.7rem] text-faint">{label}</p>
+      <p className="mt-0.5 text-sm font-semibold tabular-nums text-ink">{value}</p>
+    </div>
+  );
+}
+
+function JobResultView({ result }: { result: unknown }) {
+  const root = asRecord(result);
+  const status = typeof root.status === "string" ? root.status : null;
+  const summary = asRecord(root.summary);
+  const warnings = Array.isArray(root.warnings) ? root.warnings : [];
+  const errors = Array.isArray(root.errors) ? root.errors : [];
+  const checks = Array.isArray(summary.checks) ? summary.checks : [];
+  const cleanup = asRecord(summary.cleanup);
+  const written = asRecord(summary.written);
+  const isRecompute = summary.allocationRowCount !== undefined;
+  const isStaging = !status && summary.rowCount !== undefined;
+
+  return (
+    <div className="mt-4 rounded-xl border border-line bg-surface-muted p-4" aria-live="polite">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-ink">최근 작업 결과</span>
+        {status ? (
+          <StatusPill tone={JOB_STATUS_TONE[status] ?? "neutral"}>{status}</StatusPill>
+        ) : root.ok === false ? (
+          <StatusPill tone="danger">실패</StatusPill>
+        ) : root.ok === true ? (
+          <StatusPill tone="ok">완료</StatusPill>
+        ) : null}
+        {typeof root.step === "string" ? <span className="text-xs text-faint">{root.step}</span> : null}
+        {typeof root.etlRunId === "string" ? <span className="text-xs tabular-nums text-faint">{root.etlRunId}</span> : null}
+      </div>
+
+      {isRecompute ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric label="이동 row" value={formatNumber(asNumber(summary.movementRowCount))} />
+          <Metric label="정산 row" value={formatNumber(asNumber(summary.settlementRowCount))} />
+          <Metric label="배부 row" value={formatNumber(asNumber(summary.allocationRowCount))} />
+          <Metric label="월별 row" value={formatNumber(asNumber(summary.monthlyRowCount))} />
+          <Metric label="총 배부 물류비" value={formatKrw(asNumber(asRecord(summary.totals).logisticsKrw))} />
+          <Metric label="warning" value={formatNumber(asNumber(summary.warningCount))} />
+          <Metric
+            label={cleanup.eligible ? `정리(${String(cleanup.scope ?? "")}${cleanup.month ? ` ${String(cleanup.month)}` : ""})` : "정리 (건너뜀)"}
+            value={`mart ${formatNumber(asNumber(cleanup.martRowsAffected))} · 월별 ${formatNumber(asNumber(cleanup.monthlyRowsAffected))}`}
+          />
+          {written.mart ? (
+            <Metric label="기록 mart · 월별" value={`${formatNumber(asNumber(asRecord(written.mart).written))} · ${formatNumber(asNumber(asRecord(written.monthly).written))}`} />
+          ) : (
+            <Metric label="모드" value={String(summary.mode ?? "")} />
+          )}
+        </div>
+      ) : null}
+
+      {isStaging ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric label="row" value={formatNumber(asNumber(summary.rowCount))} />
+          <Metric label="BL" value={formatNumber(asNumber(summary.blCount))} />
+          <Metric label="file" value={formatNumber(asNumber(summary.fileCount))} />
+          <Metric label="최근 업데이트" value={typeof summary.latestUpdatedAt === "string" ? summary.latestUpdatedAt.slice(0, 19) : "-"} />
+        </div>
+      ) : null}
+
+      {checks.length ? (
+        <div className="mt-3 space-y-1.5">
+          {checks.map((check, index) => {
+            const row = asRecord(check);
+            const checkStatus = String(row.status ?? "");
+            return (
+              <div key={index} className="flex items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2 text-xs">
+                <span className="flex items-center gap-2">
+                  <StatusPill tone={CHECK_TONE[checkStatus] ?? "neutral"}>{checkStatus}</StatusPill>
+                  <span className="text-ink">{String(row.label ?? row.code ?? "")}</span>
+                </span>
+                <span className="tabular-nums text-faint">{String(row.actual ?? "")}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {warnings.length ? (
+        <p className="mt-3 text-xs text-warn-ink">
+          경고 {warnings.length}건: {warnings.slice(0, 3).map((warning) => String(asRecord(warning).message ?? "")).join(" · ")}
+          {warnings.length > 3 ? " …" : ""}
+        </p>
+      ) : null}
+      {errors.length ? (
+        <p className="mt-2 text-xs text-danger">오류: {errors.map((err) => String(asRecord(err).message ?? "")).join(" · ")}</p>
+      ) : null}
+
+      <div className="mt-3">
+        <Collapsible title="원본 JSON" meta="raw">
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs leading-5 text-muted">{JSON.stringify(result, null, 2)}</pre>
+        </Collapsible>
+      </div>
+    </div>
   );
 }
 
@@ -487,7 +644,7 @@ function JobActionCard({
         <StatusPill tone={tone}>{tone === "warn" ? "write" : "read"}</StatusPill>
       </div>
       <p className="mt-2 min-h-12 text-xs leading-5 text-muted">{description}</p>
-      <button className={`btn mt-4 w-full ${tone === "warn" ? "btn-secondary" : "btn-primary"}`} disabled={disabled} onClick={onClick} type="button">
+      <button className={`btn mt-4 w-full ${tone === "warn" ? "btn-secondary" : "btn-primary"}`} disabled={disabled} aria-busy={running} onClick={onClick} type="button">
         {running ? "실행 중" : button}
       </button>
     </div>
@@ -520,7 +677,7 @@ function SelectFilter({
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
-    <button className={`btn ${active ? "btn-primary" : "btn-secondary"}`} onClick={onClick} type="button">
+    <button className={`btn ${active ? "btn-primary" : "btn-secondary"}`} aria-pressed={active} onClick={onClick} type="button">
       {children}
     </button>
   );
@@ -557,6 +714,9 @@ function AnalysisTable({ rows }: { rows: ShipmentAnalysisRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-line bg-surface">
+            {rows.length === 0 ? (
+              <tr><td colSpan={20} className="px-3 py-8 text-center text-faint">표시할 데이터가 없습니다.</td></tr>
+            ) : null}
             {rows.map((row) => (
               <tr key={row.sourceLineId} className="hover:bg-surface-muted/60">
                 <td className="px-3 py-2"><StatusPill tone={row.analysisStatus === "analyzed" ? "ok" : "neutral"}>{row.analysisStatus === "analyzed" ? "분석완료" : "미분석"}</StatusPill></td>
@@ -612,6 +772,9 @@ function OceanSourceTable({ rows }: { rows: OceanSettlementLineRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-line bg-surface">
+            {rows.length === 0 ? (
+              <tr><td colSpan={10} className="px-3 py-8 text-center text-faint">표시할 데이터가 없습니다.</td></tr>
+            ) : null}
             {rows.map((row) => (
               <tr key={row.rawKey} className="hover:bg-surface-muted/60">
                 <td className="px-3 py-2 tabular-nums text-faint">{row.invoiceDate || "-"}</td>
@@ -656,6 +819,9 @@ function MonthlyTable({ rows }: { rows: MonthlySkuCostRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-line bg-surface">
+            {rows.length === 0 ? (
+              <tr><td colSpan={12} className="px-3 py-8 text-center text-faint">표시할 데이터가 없습니다.</td></tr>
+            ) : null}
             {rows.map((row) => (
               <tr key={row.rawKey} className="hover:bg-surface-muted/60">
                 <td className="px-3 py-2 tabular-nums text-faint">{row.month}</td>

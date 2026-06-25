@@ -111,6 +111,8 @@ export function buildMonthlyRows(rows: OceanAllocationRow[], etlRunId: string): 
     current.skuOtherAllocKrw += row.skuOtherKrw;
     if (row.blNo) current.bls.add(row.blNo);
     if (row.invoiceNo) current.invoices.add(row.invoiceNo);
+    // Invariant: allocateOceanSettlement writes identical invoice_total_* on every row
+    // of a BL, so taking the first row per BL is a correct (not lossy) dedup here.
     if (row.blNo && !current.totalsByBl.has(row.blNo)) {
       current.totalsByBl.set(row.blNo, {
         invoiceTotalLogisticsKrw: row.invoiceTotalLogisticsKrw,
@@ -159,6 +161,8 @@ export function buildMonthlyRows(rows: OceanAllocationRow[], etlRunId: string): 
 
 export function summarizeAllocation(rows: OceanAllocationRow[]): OceanAllocationTotals {
   const totalsByBl = new Map<string, Pick<OceanAllocationRow, "invoiceTotalLogisticsKrw" | "invoiceTotalFreightKrw" | "invoiceTotalDutyKrw" | "invoiceTotalOtherKrw">>();
+  // invoice_total_* is identical across all rows of a BL (see allocateOceanSettlement),
+  // so first-seen-per-BL avoids double-counting the BL total across its SKU rows.
   for (const row of rows) {
     if (!totalsByBl.has(row.blNo)) {
       totalsByBl.set(row.blNo, {
