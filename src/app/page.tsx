@@ -27,9 +27,9 @@ export default function Home() {
           </Link>
           <Link
             className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            href="/global/logistics-settlement/ocean"
+            href="/global/logistics-settlement"
           >
-            해상 정산 분석
+            물류 정산 분석
           </Link>
         </div>
       </section>

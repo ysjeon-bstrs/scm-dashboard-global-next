@@ -5,16 +5,16 @@ import { buildJobActionResponse, mapWarningsToStatus } from "../src/lib/scm-dash
 
 test("buildJobActionResponse returns a stable job envelope", () => {
   const response = buildJobActionResponse({
-    etlRunId: "logistics_settlement_ocean_import_20260622T010000Z",
+    etlRunId: "logistics_settlement_ocean_recompute_20260622T010000Z",
     mode: "ocean",
-    step: "IMPORT_DRY_RUN",
+    step: "RECOMPUTE",
     summary: { parsedRowCount: 2 },
     warnings: [{ code: "DUPLICATE_RAW_KEY", message: "Duplicate row" }],
   });
 
   assert.equal(response.ok, true);
   assert.equal(response.mode, "ocean");
-  assert.equal(response.step, "IMPORT_DRY_RUN");
+  assert.equal(response.step, "RECOMPUTE");
   assert.equal(response.status, "SUCCEEDED_WITH_WARNINGS");
   assert.equal(response.warnings.length, 1);
   assert.deepEqual(response.errors, []);

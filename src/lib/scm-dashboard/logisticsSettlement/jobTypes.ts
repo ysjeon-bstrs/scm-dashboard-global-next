@@ -1,12 +1,8 @@
 export type LogisticsJobMode = "ocean" | "ground" | "send" | "air";
 
-export type LogisticsJobStep =
-  | "SCAN"
-  | "NORMALIZE_PREVIEW"
-  | "IMPORT_DRY_RUN"
-  | "IMPORT_APPLY"
-  | "RECOMPUTE"
-  | "VALIDATE";
+// Only the steps the live web routes actually emit. Sheet import/bootstrap runs via
+// the admin CLI (scripts/etl/...), which logs raw JSON rather than this envelope.
+export type LogisticsJobStep = "RECOMPUTE" | "VALIDATE";
 
 export type LogisticsJobStatus =
   | "SUCCEEDED"

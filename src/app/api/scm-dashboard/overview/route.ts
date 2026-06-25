@@ -116,7 +116,7 @@ export async function GET() {
         id: "ocean-settlement",
         label: "해상 정산",
         description: "boosters_scm 이동 로그와 Supabase 정산 mart를 연결하는 Ocean MVP 페이지입니다. 해상 parity 이후 SEND/그라운드/Unit Economics로 확장합니다.",
-        href: "/global/logistics-settlement/ocean",
+        href: "/global/logistics-settlement",
         status: "active",
         status_label: "MVP 구현중",
         snapshot_date: null,
