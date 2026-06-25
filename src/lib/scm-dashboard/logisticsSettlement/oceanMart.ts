@@ -20,16 +20,29 @@ export type OceanCleanupPlan = {
 };
 
 /**
- * Decide whether/how a recompute may delete stale ocean_v1 mart rows.
- * - Scope is the TARGET month (the requested `month`), not the months produced by allocation.
- * - A partial run (`limit` set) must NOT clean up: it only processes a subset, so deleting
- *   "stale" rows would drop data the partial run never regenerated.
+ * Decide whether/how a recompute may delete stale ocean_v1 mart rows. Cleanup is only
+ * eligible on a full run (no `month`, no `limit`):
+ * - A partial run (`limit` set) processes a subset, so deleting "stale" rows would drop
+ *   data the partial run never regenerated.
+ * - A month-scoped run is unsafe to clean up because moves are filtered by onboard_date
+ *   month while settlement is filtered by invoice_date month: a BL that onboards in month
+ *   M but invoices in M+1 is allocated in NEITHER scoped run, yet a scoped delete could
+ *   remove its existing mart row without regenerating it. Skip until the move/settlement
+ *   month basis is unified; a full run still cleans up correctly.
  */
 export function planOceanCleanup(options: { month?: string; limit?: number }): OceanCleanupPlan {
   const scope = options.month ? "month" : "all";
   const month = options.month ?? null;
   if (options.limit) {
     return { eligible: false, reason: "partial run (limit set): cleanup skipped", scope, month };
+  }
+  if (options.month) {
+    return {
+      eligible: false,
+      reason: "month-scoped cleanup skipped until movement/settlement month basis is unified",
+      scope,
+      month,
+    };
   }
   return { eligible: true, reason: null, scope, month };
 }

@@ -15,7 +15,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const limit = clampLimit(request.nextUrl.searchParams.get("limit"), 20, 500);
+  // Full latest-snapshot loads need to return every lot row; cap high enough to cover
+  // realistic multi-depot inventories. The client treats rows.length === limit as a
+  // possible truncation and blocks allocation/download.
+  const limit = clampLimit(request.nextUrl.searchParams.get("limit"), 20, 100000);
   const sku = request.nextUrl.searchParams.get("sku");
   const depot = request.nextUrl.searchParams.get("depot");
   const latestOnly = request.nextUrl.searchParams.get("latestOnly") !== "false";

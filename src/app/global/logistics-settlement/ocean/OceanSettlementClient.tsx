@@ -443,9 +443,9 @@ function SettlementJobsPanel({ onRefresh }: { onRefresh: () => void }) {
         />
         <JobActionCard
           title="3. SKU 배부 재계산"
-          description="doc_analysis/monthly mart를 재계산하고 대상 범위의 stale 행을 교체합니다. 적용 전 미리보기로 확인하세요."
-          button="재계산 적용"
-          disabled={Boolean(isRunning)}
+          description="doc_analysis/monthly mart를 재계산하고 stale 행을 교체합니다. 적용은 full 런(월 비움)에서만 가능 — 월을 지정하면 미리보기/검증 전용입니다."
+          button={month.trim() ? "월 지정 시 적용 불가" : "재계산 적용"}
+          disabled={Boolean(isRunning) || Boolean(month.trim())}
           running={isRunning === "recompute:apply"}
           tone="warn"
           onClick={() => setConfirmingApply(true)}

@@ -17,6 +17,23 @@ export async function POST(request: NextRequest) {
   };
   const etlRunId = buildLogisticsEtlRunId(body.apply ? "logistics_settlement_ocean_recompute_apply" : "logistics_settlement_ocean_recompute_dry_run");
 
+  if (body.apply && body.month) {
+    // Month-scoped apply is disabled: stale-row cleanup only runs on full runs (a
+    // month-scoped run can't see BLs that straddle the onboard/invoice month boundary),
+    // so a month apply would leave/strand stale mart rows. Month runs are dry-run only.
+    return NextResponse.json(
+      buildJobActionResponse({
+        etlRunId,
+        mode: "ocean",
+        step: "RECOMPUTE",
+        status: "BLOCKED",
+        summary: null,
+        errors: [{ code: "MONTH_SCOPED_APPLY_DISABLED", message: "Month-scoped apply is disabled. Clear the month and run a full apply (cleanup runs on full runs only); use a month only for dry-run review." }],
+      }),
+      { status: 400 },
+    );
+  }
+
   if (body.apply && body.confirmation !== "APPLY_OCEAN_RECOMPUTE") {
     return NextResponse.json(
       buildJobActionResponse({

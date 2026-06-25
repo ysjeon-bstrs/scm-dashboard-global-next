@@ -152,6 +152,7 @@ export default function CjAllocationClient({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingStock, setIsLoadingStock] = useState(false);
+  const [stockTruncated, setStockTruncated] = useState(false);
   const [isAllocating, setIsAllocating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -597,27 +598,38 @@ export default function CjAllocationClient({
   const loadStock = useCallback(async () => {
     if (!user) return;
 
+    // High enough to load every lot row of a realistic multi-depot snapshot. If the
+    // response still hits this many rows it may be truncated, so allocation is blocked.
+    const LOAD_LIMIT = 100000;
     setIsLoadingStock(true);
+    setStockTruncated(false);
     setError(null);
 
-    const response = await fetch(
-      `${SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH}?limit=500&latestOnly=true`,
-      { cache: "no-store" },
-    );
+    try {
+      const response = await fetch(
+        `${SCM_DASHBOARD_CJ_LOT_STOCK_API_PATH}?limit=${LOAD_LIMIT}&latestOnly=true`,
+        { cache: "no-store" },
+      );
 
-    if (!response.ok) {
-      setError(await getApiErrorMessage(response, "CJ lot stock API failed"));
+      if (!response.ok) {
+        setError(await getApiErrorMessage(response, "CJ lot stock API failed"));
+        return;
+      }
+
+      const payload = (await response.json()) as CjLotStockResponse;
+      const truncated = payload.rows.length >= LOAD_LIMIT;
+      setStockTruncated(truncated);
+      setStockRows(dedupeCjStockRows(payload.rows));
+      const closeDate = payload.rows[0]?.close_date?.slice(0, 10);
+      setMessage(
+        `${closeDate ? `마감일 ${closeDate} · ` : ""}${payload.rows.length.toLocaleString()}개 로트 로드 완료 (전 센터).` +
+          (truncated ? " ⚠ 행 수가 상한에 도달해 일부가 잘렸을 수 있어 배정/다운로드를 차단합니다." : ""),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "CJ lot stock 로드에 실패했습니다.");
+    } finally {
       setIsLoadingStock(false);
-      return;
     }
-
-    const payload = (await response.json()) as CjLotStockResponse;
-    setStockRows(dedupeCjStockRows(payload.rows));
-    const closeDate = payload.rows[0]?.close_date?.slice(0, 10);
-    setMessage(
-      `${closeDate ? `마감일 ${closeDate} · ` : ""}${payload.rows.length.toLocaleString()}개 로트 로드 완료 (전 센터).`,
-    );
-    setIsLoadingStock(false);
   }, [user]);
 
   useEffect(() => {
@@ -625,6 +637,15 @@ export default function CjAllocationClient({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadStock();
   }, [loadStock]);
+
+  useEffect(() => {
+    // Any change to an allocation input makes a prior allocation stale; clear it so a
+    // download can never run against inputs that differ from what was allocated.
+    // allocate() only reads these (never mutates them), so this does not fire right
+    // after a successful allocation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAllocResult(null);
+  }, [depot, outboundType, uploadRows, manualLots, selectedLotSet]);
 
   async function signInWithGoogle() {
     try {
@@ -710,9 +731,11 @@ export default function CjAllocationClient({
   const allocations = allocResult?.allocations ?? [];
   const shortageEa = allocResult?.shortageEa ?? 0;
   const canAllocate =
-    validRows.length > 0 && validation.errorCount === 0 && !isAllocating;
-  const canDownload = allocations.length > 0 && shortageEa === 0;
-  const downloadBlocker = !fileName
+    validRows.length > 0 && validation.errorCount === 0 && !isAllocating && !stockTruncated;
+  const canDownload = allocations.length > 0 && shortageEa === 0 && !stockTruncated;
+  const downloadBlocker = stockTruncated
+    ? "재고 스냅샷이 행 상한에 도달해 일부가 잘렸을 수 있습니다 — 배정/다운로드가 차단됩니다."
+    : !fileName
     ? "출고 요청 파일을 업로드해야 합니다."
     : validation.errorCount > 0
       ? `검증 오류 ${validation.errorCount.toLocaleString()}건을 먼저 수정해야 합니다.`

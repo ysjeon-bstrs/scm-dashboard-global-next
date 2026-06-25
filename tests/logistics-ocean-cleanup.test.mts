@@ -11,11 +11,14 @@ test("full recompute (no month, no limit) cleans up the whole ocean_v1 scope", (
   assert.equal(plan.reason, null);
 });
 
-test("month-scoped recompute targets that month only", () => {
+test("month-scoped recompute is NOT eligible for cleanup (deletion-safety guard)", () => {
+  // moves are filtered by onboard month, settlement by invoice month, so a month-scoped
+  // delete could drop a straddling BL's row without regenerating it. Cleanup is full-run only.
   const plan = planOceanCleanup({ month: "2026-05" });
-  assert.equal(plan.eligible, true);
+  assert.equal(plan.eligible, false);
   assert.equal(plan.scope, "month");
   assert.equal(plan.month, "2026-05");
+  assert.ok(plan.reason && plan.reason.includes("month-scoped"));
 });
 
 test("partial run (limit set) is NOT eligible for cleanup", () => {

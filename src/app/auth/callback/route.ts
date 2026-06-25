@@ -5,7 +5,13 @@ import { createServerSupabaseClient } from "@/lib/scm-dashboard/supabaseClient";
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
-  const next = requestUrl.searchParams.get("next") ?? "/global/scm-dashboard";
+  // Only allow same-origin relative paths to prevent an open redirect via `next`
+  // (e.g. https://evil.com or //evil.com, which `new URL` would resolve off-origin).
+  const requestedNext = requestUrl.searchParams.get("next");
+  const next =
+    requestedNext && requestedNext.startsWith("/") && !requestedNext.startsWith("//")
+      ? requestedNext
+      : "/global/scm-dashboard";
 
   if (code) {
     const supabase = await createServerSupabaseClient();
