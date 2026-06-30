@@ -1,6 +1,7 @@
 import mysql, { type Pool } from "mysql2/promise";
 
 let sourceDbPool: Pool | null = null;
+let crewDbPool: Pool | null = null;
 
 type QueryValue = string | number | boolean | Date | null;
 type QueryParams = QueryValue[] | Record<string, QueryValue>;
@@ -59,6 +60,25 @@ function getSourceDbPool() {
   return sourceDbPool;
 }
 
+function getCrewDbPool() {
+  if (!crewDbPool) {
+    crewDbPool = mysql.createPool({
+      host: requireSourceEnv("BOOSTERS_CREW_MYSQL_HOST"),
+      port: Number(getEnv("BOOSTERS_CREW_MYSQL_PORT") ?? 3306),
+      database: getEnv("BOOSTERS_CREW_MYSQL_DATABASE") ?? "boosters",
+      user: requireSourceEnv("BOOSTERS_CREW_MYSQL_USER"),
+      password: requireSourceEnv("BOOSTERS_CREW_MYSQL_PASSWORD"),
+      waitForConnections: true,
+      connectionLimit: 5,
+      enableKeepAlive: true,
+      namedPlaceholders: true,
+      timezone: "+00:00",
+    });
+  }
+
+  return crewDbPool;
+}
+
 export async function querySourceDbReadOnly<T>(
   sql: string,
   params?: QueryParams,
@@ -69,8 +89,22 @@ export async function querySourceDbReadOnly<T>(
   return rows as T[];
 }
 
+export async function queryCrewDbReadOnly<T>(
+  sql: string,
+  params?: QueryParams,
+) {
+  assertReadOnlySql(sql);
+  const pool = getCrewDbPool();
+  const [rows] = await pool.query(sql, params);
+  return rows as T[];
+}
+
 export async function testSourceDbConnection() {
   return querySourceDbReadOnly<{ ok: number }>("SELECT 1 AS ok");
+}
+
+export async function testCrewDbConnection() {
+  return queryCrewDbReadOnly<{ ok: number }>("SELECT 1 AS ok");
 }
 
 export const queryBoostersScmReadOnly = querySourceDbReadOnly;

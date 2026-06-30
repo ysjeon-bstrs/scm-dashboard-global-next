@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getAuthenticatedUser } from "@/lib/scm-dashboard/auth";
 import { fetchAmazonStockSummary } from "@/lib/scm-dashboard/amazonStockQueries";
+import { fetchAcrossbSummary } from "@/lib/scm-dashboard/acrossbQueries";
 import { fetchCjLotStocks } from "@/lib/scm-dashboard/cjQueries";
 import { fetchDomesticStockSummary } from "@/lib/scm-dashboard/domesticStockQueries";
 
@@ -42,6 +43,13 @@ export async function GET() {
   const amazon = await fetchAmazonStockSummary().catch((error: unknown) => {
     notices.push(
       `Amazon FBA 재고를 불러오지 못했습니다: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+    return null;
+  });
+
+  const acrossb = await fetchAcrossbSummary().catch((error: unknown) => {
+    notices.push(
+      `AcrossB 재고를 불러오지 못했습니다: ${error instanceof Error ? error.message : "unknown error"}`,
     );
     return null;
   });
@@ -111,6 +119,23 @@ export async function GET() {
           { label: "Center", value: amazon?.meta.center_count ?? null },
         ],
         tone: amazon ? "brand" : "neutral",
+      },
+      {
+        id: "acrossb",
+        label: "AcrossB NL/UK",
+        description: "AcrossB Open API 원천 테이블을 read-only로 조회하는 NL/UK WMS 재고와 입고 요청 화면입니다. US 창고는 현재 운영 범위에서 제외합니다.",
+        href: "/global/acrossb",
+        status: acrossb ? "active" : "unavailable",
+        status_label: acrossb ? "재고 연결" : "확인 필요",
+        snapshot_date: acrossb?.meta.latest_inventory_updated_at?.slice(0, 10) ?? null,
+        primary_metric_label: "Available",
+        primary_metric_value: acrossb?.totals.available_qty ?? null,
+        secondary_metrics: [
+          { label: "SKU", value: acrossb?.meta.sku_count ?? null },
+          { label: "LOT", value: acrossb?.meta.lot_count ?? null },
+          { label: "Inbound", value: acrossb?.meta.inbound_request_count ?? null },
+        ],
+        tone: acrossb ? "ok" : "neutral",
       },
       {
         id: "ocean-settlement",

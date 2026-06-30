@@ -31,6 +31,12 @@ export default function Home() {
           >
             물류 정산 분석
           </Link>
+          <Link
+            className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            href="/global/acrossb"
+          >
+            AcrossB NL/UK 재고
+          </Link>
         </div>
       </section>
     </main>

@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/*.test.mts"
+    "test": "tsx --test tests/*.test.mts",
+    "etl:daily": "npx tsx scripts/etl/run-daily-scm-etl.ts",
+    "etl:daily:apply": "npx tsx scripts/etl/run-daily-scm-etl.ts --apply"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
