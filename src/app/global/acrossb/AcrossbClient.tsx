@@ -85,6 +85,30 @@ function transportTone(method: string) {
   return "neutral" as const;
 }
 
+function warehouseAccent(code: string) {
+  if (code === "AXB-NL-DKW-1") {
+    return {
+      card: "border-sky-200 bg-sky-50/45",
+      pill: "border-sky-200 bg-sky-100 text-sky-800",
+      dot: "bg-sky-500",
+    };
+  }
+
+  if (code === "AXB-UK-HMI-1") {
+    return {
+      card: "border-violet-200 bg-violet-50/45",
+      pill: "border-violet-200 bg-violet-100 text-violet-800",
+      dot: "bg-violet-500",
+    };
+  }
+
+  return {
+    card: "border-line bg-white",
+    pill: "border-line bg-sunken text-muted",
+    dot: "bg-muted",
+  };
+}
+
 export default function AcrossbClient({ user, initialAuthError }: AcrossbClientProps) {
   const [summary, setSummary] = useState<AcrossbSummary>(emptySummary);
   const [activeTab, setActiveTab] = useState<ActiveTab>("sku");
@@ -201,10 +225,15 @@ export default function AcrossbClient({ user, initialAuthError }: AcrossbClientP
 
         <div className="grid gap-4 lg:grid-cols-2">
           {summary.warehouses.map((row) => (
-            <Panel key={row.warehouse_code}>
+            <Panel className={warehouseAccent(row.warehouse_code).card} key={row.warehouse_code}>
               <PanelHeader
                 meta={`${row.country_code} · ${row.timezone}`}
-                title={`${row.warehouse_name} (${row.warehouse_code})`}
+                title={
+                  <span className="inline-flex items-center gap-2">
+                    <WarehousePill code={row.warehouse_code} />
+                    <span className="text-xs font-medium text-faint">{row.warehouse_code}</span>
+                  </span>
+                }
               />
               <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
                 <SmallStat label="가용" value={formatNumber(row.available_qty)} tone="text-ok-ink" />
@@ -292,22 +321,31 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
+function WarehousePill({ code }: { code: string }) {
+  const accent = warehouseAccent(code);
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${accent.pill}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${accent.dot}`} />
+      {warehouseLabel(code)}
+    </span>
+  );
+}
+
 function SkuTable({ rows }: { rows: AcrossbSkuSummaryRow[] }) {
   return (
     <Panel className="p-0">
       <div className="border-b border-line px-4 py-3"><PanelHeader title="SKU 요약" meta={`${formatNumber(rows.length)} rows`} /></div>
       <TableFrame>
-        <thead><tr>{["창고", "SKU", "상품명", "가용", "보유", "LOT", "최근접 유통기한", "최대 보관일"].map((head) => <Th key={head}>{head}</Th>)}</tr></thead>
+        <thead><tr>{["창고", "SKU", "상품명", "가용", "보유", "LOT", "최대 보관일"].map((head) => <Th key={head}>{head}</Th>)}</tr></thead>
         <tbody>
           {rows.map((row) => (
             <tr className="border-b border-line" key={`${row.warehouse_code}-${row.sku}`}>
-              <Td><StatusPill tone="brand">{warehouseLabel(row.warehouse_code)}</StatusPill></Td>
+              <Td><WarehousePill code={row.warehouse_code} /></Td>
               <Td mono strong>{row.sku}</Td>
               <Td>{row.name}</Td>
               <Td align="right" strong>{formatNumber(row.available_qty)}</Td>
               <Td align="right">{formatNumber(row.on_hand_qty)}</Td>
               <Td align="right">{formatNumber(row.lot_count)}</Td>
-              <Td><StatusPill tone={expiryTone(row.nearest_expiration_date)}>{formatDate(row.nearest_expiration_date)}</StatusPill></Td>
               <Td align="right">{row.max_inventory_age_days ?? "-"}</Td>
             </tr>
           ))}
@@ -326,7 +364,7 @@ function InventoryTable({ rows }: { rows: AcrossbInventoryRow[] }) {
         <tbody>
           {rows.map((row) => (
             <tr className="border-b border-line" key={`${row.warehouse_code}-${row.line_item_id}-${row.sku}-${row.lot_number}`}>
-              <Td><StatusPill tone="brand">{warehouseLabel(row.warehouse_code)}</StatusPill></Td>
+              <Td><WarehousePill code={row.warehouse_code} /></Td>
               <Td mono strong>{row.sku}</Td>
               <Td mono>{row.lot_number || "-"}</Td>
               <Td><StatusPill tone={expiryTone(row.expiration_date)}>{formatDate(row.expiration_date)}</StatusPill></Td>
@@ -354,7 +392,7 @@ function InboundTable({ rows }: { rows: AcrossbInboundRequestRow[] }) {
         <tbody>
           {rows.map((row) => (
             <tr className="border-b border-line" key={row.inbound_id}>
-              <Td><StatusPill tone="brand">{warehouseLabel(row.warehouse_code)}</StatusPill></Td>
+              <Td><WarehousePill code={row.warehouse_code} /></Td>
               <Td mono strong>{row.reference_number}</Td>
               <Td><StatusPill tone={row.status === "COMPLETED" ? "ok" : "warn"}>{row.status}</StatusPill></Td>
               <Td><StatusPill tone={transportTone(row.transport_method)}>{row.transport_method || "-"}</StatusPill></Td>
