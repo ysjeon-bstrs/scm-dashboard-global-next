@@ -6,8 +6,32 @@ let crewDbPool: Pool | null = null;
 type QueryValue = string | number | boolean | Date | null;
 type QueryParams = QueryValue[] | Record<string, QueryValue>;
 
+function normalizeEnvValue(value: string | undefined, names: string[]) {
+  if (!value) return undefined;
+  let normalized = value.trim();
+
+  for (const name of names) {
+    const prefix = `${name}=`;
+    if (normalized.startsWith(prefix)) {
+      normalized = normalized.slice(prefix.length).trim();
+      break;
+    }
+  }
+
+  if (
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+  ) {
+    normalized = normalized.slice(1, -1);
+  }
+
+  return normalized;
+}
+
 function getEnv(name: string, legacyName?: string) {
-  return process.env[name] || (legacyName ? process.env[legacyName] : undefined);
+  const names = [name, legacyName].filter((value): value is string => Boolean(value));
+  return normalizeEnvValue(process.env[name], names) ||
+    (legacyName ? normalizeEnvValue(process.env[legacyName], names) : undefined);
 }
 
 function requireSourceEnv(name: string, legacyName?: string) {
