@@ -31,7 +31,11 @@ export async function getAuthenticatedUser() {
   }
 
   if (!isAllowedEmail(user.email)) {
-    await supabase.auth.signOut();
+    // Do NOT signOut() here: this helper runs during Server Component render,
+    // where cookie writes are silently swallowed (see supabaseClient setAll),
+    // so the "sign out" never actually lands and only mutates remote session
+    // state mid-render. Every gate re-checks the domain, so simply reporting
+    // forbidden-domain is safe; real sign-out happens via POST /api/auth/signout.
     return { user: null, error: "forbidden-domain" as const };
   }
 

@@ -55,6 +55,16 @@ function assertReadOnlySql(sql: string) {
   if (!isReadOnly) {
     throw new Error("Only read-only MySQL queries are allowed in this prototype.");
   }
+
+  // A SELECT prefix is not enough: reject statement chaining and file-writing
+  // SELECT variants. Fail-closed even for literals containing these tokens —
+  // internal queries never need them.
+  if (normalized.includes(";")) {
+    throw new Error("Multi-statement SQL is not allowed in read-only queries.");
+  }
+  if (/\binto\s+(outfile|dumpfile)\b/.test(normalized)) {
+    throw new Error("SELECT ... INTO OUTFILE/DUMPFILE is not allowed in read-only queries.");
+  }
 }
 
 function getSourceDbPool() {
