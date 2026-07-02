@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-02T00:00:00Z",
+  "title": "Design System: SCM Dashboard Global Next",
+  "extensions": {
+    "colorMeta": {
+      "brand": { "role": "primary", "displayName": "Portal Blue", "canonical": "#2563eb", "tonalRamp": ["#1e3a8a", "#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#dbeafe"] },
+      "ink": { "role": "neutral", "displayName": "Ink / Slate", "canonical": "#111827", "tonalRamp": ["#111827", "#1f2937", "#374151", "#4b5563", "#6b7280", "#9ca3af", "#d1d5db", "#f9fafb"] },
+      "ok": { "role": "secondary", "displayName": "Signal Green", "canonical": "#15803d", "tonalRamp": ["#14532d", "#166534", "#15803d", "#16a34a", "#22c55e", "#4ade80", "#86efac", "#dcfce7"] },
+      "warn": { "role": "secondary", "displayName": "Signal Amber", "canonical": "#d97706", "tonalRamp": ["#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fbbf24", "#fcd34d", "#fef3c7"] },
+      "danger": { "role": "secondary", "displayName": "Signal Red", "canonical": "#b91c1c", "tonalRamp": ["#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fecaca", "#fee2e2"] }
+    },
+    "typographyMeta": {
+      "metric": { "displayName": "Metric", "purpose": "KPI / Stat values — the loudest element on any screen; tabular numerals." },
+      "code": { "displayName": "Code", "purpose": "Real machine identifiers only (SKU, lot, BL)." }
+    },
+    "shadows": [
+      { "name": "panel", "value": "0 1px 4px rgb(15 23 42 / 0.06)", "purpose": "Resting lift on .panel surfaces (the single card look)." },
+      { "name": "pop", "value": "0 8px 24px rgb(15 23 42 / 0.12)", "purpose": "Transient overlays only: dropdowns, popovers." }
+    ],
+    "motion": [
+      { "name": "rise", "value": "0.5s cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Single page-load entrance; gated behind prefers-reduced-motion: no-preference." },
+      { "name": "standard", "value": "150ms", "purpose": "Default state transition (buttons, fields, segments)." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single most important action on a surface. Rare by design.",
+      "html": "<button class=\"ds-btn-primary\">재계산 적용</button>",
+      "css": ".ds-btn-primary { display:inline-flex; min-height:2.25rem; align-items:center; justify-content:center; gap:0.5rem; border-radius:0.5rem; padding:0 0.75rem; font-size:0.875rem; font-weight:500; color:var(--color-on-brand); background:var(--color-brand); box-shadow:0 1px 2px rgb(15 23 42 / 0.08); border:none; cursor:pointer; transition:background .15s; } .ds-btn-primary:hover { background:var(--color-brand-press); } .ds-btn-primary:focus-visible { outline:2px solid var(--color-brand); outline-offset:2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "The workhorse action; low-key, bordered.",
+      "html": "<button class=\"ds-btn-secondary\">새로고침</button>",
+      "css": ".ds-btn-secondary { display:inline-flex; min-height:2.25rem; align-items:center; justify-content:center; gap:0.5rem; border-radius:0.5rem; padding:0 0.75rem; font-size:0.875rem; font-weight:500; color:var(--color-ink); background:var(--color-surface); border:1px solid var(--color-line); cursor:pointer; transition:background .15s; } .ds-btn-secondary:hover { background:var(--color-sunken); }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The single source of the card look. Never nested.",
+      "html": "<section class=\"ds-panel\"><p class=\"ds-eyebrow\">doc_analysis</p><p style=\"font-size:1.75rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--color-ink);line-height:1;margin:.5rem 0 0\">1,284<span style=\"font-size:.9rem;color:var(--color-faint)\"> EA</span></p></section>",
+      "css": ".ds-panel { background:var(--color-surface); border:1px solid var(--color-line); border-radius:0.75rem; box-shadow:0 1px 4px rgb(15 23 42 / 0.06); padding:1.25rem; } .ds-eyebrow { font-size:0.6875rem; font-weight:600; letter-spacing:0.08em; color:var(--color-brand); margin:0; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Text input; brand focus ring.",
+      "html": "<input class=\"ds-field\" placeholder=\"Invoice, BL, SKU 검색\" />",
+      "css": ".ds-field { min-height:2.25rem; width:100%; box-sizing:border-box; border-radius:0.5rem; border:1px solid var(--color-line); background:var(--color-surface); padding:0 0.75rem; font-size:0.875rem; color:var(--color-ink); box-shadow:0 1px 2px rgb(15 23 42 / 0.05); } .ds-field::placeholder { color:var(--color-faint); } .ds-field:focus-visible { border-color:var(--color-brand); box-shadow:0 0 0 2px rgb(37 99 235 / 0.25); outline:none; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "pill-ok",
+      "description": "Color-as-meaning state chip; leading dot reinforces state. Variants swap the soft/ink pair (ok/warn/danger/brand/neutral).",
+      "html": "<span class=\"ds-pill ds-pill-ok\"><span class=\"ds-pill-dot\"></span>분석완료</span>",
+      "css": ".ds-pill { display:inline-flex; align-items:center; gap:0.375rem; border-radius:9999px; padding:0.125rem 0.625rem; font-size:0.75rem; font-weight:600; } .ds-pill-dot { width:0.375rem; height:0.375rem; border-radius:9999px; background:currentColor; opacity:.7; } .ds-pill-ok { background:var(--color-ok-soft); color:var(--color-ok-ink); }"
+    },
+    {
+      "name": "Segmented Selector",
+      "kind": "custom",
+      "refersTo": "button-primary",
+      "description": "Outbound-type / warehouse switch. Selected = brand fill; idle = bordered neutral.",
+      "html": "<div style=\"display:inline-flex;gap:0.5rem\"><button class=\"ds-seg ds-seg-on\">FBA</button><button class=\"ds-seg ds-seg-off\">FBM</button></div>",
+      "css": ".ds-seg { display:inline-flex; min-height:2.25rem; align-items:center; justify-content:center; border-radius:0.5rem; padding:0 0.75rem; font-size:0.875rem; font-weight:500; cursor:pointer; transition:background .15s,border-color .15s; } .ds-seg-on { border:1px solid var(--color-brand); background:var(--color-brand); color:var(--color-on-brand); box-shadow:0 1px 2px rgb(15 23 42 / 0.08); } .ds-seg-off { border:1px solid var(--color-line); background:var(--color-surface); color:var(--color-muted); } .ds-seg-off:hover { border-color:var(--color-line-strong); color:var(--color-ink); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operations Desk",
+    "overview": "A quiet, number-first workbench for internal Boosters supply-chain operators. Light-first and read-heavy: operators scan lot/stock tables, upload request files, confirm FEFO allocation, export WMS files, and read settlement marts. It behaves like a well-made instrument — legible numbers, clear status, calm surfaces — never like a marketing site. A portal blue accent sits over a near-neutral slate/gray canvas (hex, not OKLCH); color is rationed so the numbers lead.",
+    "keyCharacteristics": [
+      "Light-first (dark-theme tokens exist but are dormant).",
+      "Numbers are the content: tabular numerals, strong weight, generous size.",
+      "One blue accent + a three-state status triad; neutrals never compete.",
+      "Flush data ledgers (AG Grid Quartz) with all columns left-aligned.",
+      "One subtle page-load entrance; reduced-motion safe."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Portal blue marks the single most important action or state on a surface; if two things are blue, one is wrong.", "section": "colors" },
+      { "name": "The Status-Is-Meaning Rule", "body": "Green/amber/red appear only to communicate allocation or settlement state, always alongside a label or icon, never color alone.", "section": "colors" },
+      { "name": "The Numbers-Lead Rule", "body": "Quantities always use tabular numerals and the strongest weight on their row; labels stay small and tinted.", "section": "typography" },
+      { "name": "The No-Nested-Panels Rule", "body": ".panel is the single source of the card look; never put a panel inside a panel.", "section": "elevation" },
+      { "name": "The Flush-Ledger Rule", "body": "Data tables render edge-to-edge inside their panel — no wrapper frame, no zebra stripes — with all columns left-aligned.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do give every quantity tabular numerals and the strongest weight on its row.",
+      "Do keep portal blue (#2563eb) to one action/state per surface.",
+      "Do use ok/warn/danger only for real allocation/settlement state, paired with a label or icon.",
+      "Do render tables flush inside a single .panel, all columns left-aligned, row rules only.",
+      "Do bump body text toward ink for >=4.5:1 contrast (incl. placeholders); large/bold >=3:1.",
+      "Do ship one subtle rise entrance, gated behind prefers-reduced-motion: no-preference."
+    ],
+    "donts": [
+      "Don't nest .panel inside .panel, or build evenly-sized identical card grids.",
+      "Don't use generic slate-on-white admin-template styling or Inter/system-default type.",
+      "Don't use purple-blue gradients, gradient text, glassmorphism, or side-stripe (border-left) accents.",
+      "Don't ship dark mode with glowing accents (dark tokens are dormant; the product is light-first).",
+      "Don't right-align numeric grid columns (override to left) or add zebra striping to the ledger.",
+      "Don't let color be the only signal for a decision, or let a label out-weight its number."
+    ]
+  }
+}
