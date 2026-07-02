@@ -39,6 +39,7 @@ project-specific knowledge: conventions, decisions, and anti-patterns.
 
 ## Open threads
 
+- **TikTok Shop 대시보드 = 설계 완료·미구현.** 스펙: `C:\Users\BST-Desktop-051\Documents\Global_SCM\boosters_273\concepts\tiktok-dashboard-db-mart-design.md`. 라우트 `/global/tiktok`(tiktok-fbt 아님), US-first(UK는 raw 나오면). raw = 판매 `boosters.tiktok_shop_order_infos/_details`, FBT재고/입고 `boosters_external.tiktok_shop_fbt_*`. 파이프라인 = raw→TS ETL→Supabase 마트 4종(product/component sales daily, fbt_inventory_daily, doh_snapshot)→대시보드(직접읽기 MVP→마트 전환). DOH는 Amazon 패턴 그대로 재사용 필수: velocity를 `snapshot_date-1`이 아니라 마트 실재 최신 판매일(`sales_window_end_date`, 판매 ETL이 PDT D-2까지만 적재)에 앵커 + ocean식 stale-cleanup(`etl_run_id≠현재`). 리뷰에서 확정, 착수 전 잔여 = 기본 윈도우 서술의 롤링/단일날짜 불일치 정리 + 첫 런(마트 empty) missing-state 처리 2건.
 - `AGENTS.md`의 Project memory 섹션 추가분은 아직 미커밋 상태이므로 사용자가 검토 후 커밋 여부를 결정한다.
 - 정산 콘솔(ocean) P2/P3는 대부분 해결됨(stale cleanup band-aid·라우트 삭제/통합·CLI 단일화·반올림/월별/month 필터·confirm+dry-run·구조화 결과·에러 위생·a11y·jobTypes 정리·test 스크립트). 남은 후속 = ① 월별 recompute 정식화.
 - **① 월별 ocean recompute 정식화** (데이터 커지면): BL 소속월 = `max(invoice_date)`의 YYYY-MM · 대상월 후보 = 그 max가 M인 BL("M월 라인 있는 BL" 아님) · 확정 BL은 settlement 라인 전월 포함 전량 fetch · moves는 `bl_no IN (...)`(onboard 무관) · 그때 month-scoped cleanup/apply 재활성.
