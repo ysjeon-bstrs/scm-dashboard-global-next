@@ -6,7 +6,7 @@
  * sub-box remainders of the same expiry into mixed boxes.
  */
 import type { CjLotStockRow } from "./cjTypes.ts";
-import { normalizeExpiry, type FbaShipmentRow } from "./cjValidation.ts";
+import { normalizeCjSku, normalizeExpiry, type FbaShipmentRow } from "./cjValidation.ts";
 
 export const DEFAULT_CJ_SALES_UNIT_PRICE = 10000;
 
@@ -145,7 +145,7 @@ export function lotsForRequest(
   return warehouseStock
     .filter(
       (r) =>
-        r.resource_code === sku &&
+        normalizeCjSku(r.resource_code) === normalizeCjSku(sku) &&
         normalizeExpiry(r.expiration_date ?? "") === expiryNorm,
     )
     .map((r) => ({ lot: r.lot_no, available_qty: Number(r.available_qty) || 0 }))
@@ -270,7 +270,7 @@ export function checkSufficiency(
 ): ExpiryShortage[] {
   const demand = new Map<string, { sku: string; expiry: string; qty: number }>();
   for (const row of rows) {
-    const key = `${row.sku}|${row.expiry_norm}`;
+    const key = `${normalizeCjSku(row.sku)}|${row.expiry_norm}`;
     const entry = demand.get(key) ?? {
       sku: row.sku,
       expiry: row.expiry_display,
@@ -282,7 +282,7 @@ export function checkSufficiency(
 
   const available = new Map<string, number>();
   for (const stock of warehouseStock) {
-    const key = `${stock.resource_code}|${normalizeExpiry(stock.expiration_date ?? "")}`;
+    const key = `${normalizeCjSku(stock.resource_code)}|${normalizeExpiry(stock.expiration_date ?? "")}`;
     available.set(key, (available.get(key) ?? 0) + (Number(stock.available_qty) || 0));
   }
 
@@ -303,6 +303,11 @@ export interface AllocationResult {
   requestedEa: number;
 }
 
+/**
+ * `selectedLots` entries are composite keys `SKU|expiryNorm|lotNo` (the same
+ * shape as the internal availability keys) — a bare lot number would collide
+ * when the same lot id recurs across SKUs or expiries.
+ */
 export function allocateOrder(
   rows: FbaShipmentRow[],
   warehouseStock: CjLotStockRow[],
@@ -312,7 +317,7 @@ export function allocateOrder(
   // same lot isn't double-allocated (port of _allocate_sku_with_lots).
   const avail = new Map<string, number>();
   for (const stock of warehouseStock) {
-    const key = `${stock.resource_code}|${normalizeExpiry(stock.expiration_date ?? "")}|${stock.lot_no}`;
+    const key = `${normalizeCjSku(stock.resource_code)}|${normalizeExpiry(stock.expiration_date ?? "")}|${stock.lot_no}`;
     avail.set(key, (avail.get(key) ?? 0) + (Number(stock.available_qty) || 0));
   }
 
@@ -322,11 +327,11 @@ export function allocateOrder(
 
   for (const row of rows) {
     requestedEa += row.qty;
-    const prefix = `${row.sku}|${row.expiry_norm}|`;
+    const prefix = `${normalizeCjSku(row.sku)}|${row.expiry_norm}|`;
     const lots: StockLot[] = [...avail.entries()]
       .filter(([key, qty]) => key.startsWith(prefix) && qty > 0)
       .map(([key, qty]) => ({ lot: key.slice(prefix.length), available_qty: qty }))
-      .filter((lot) => !selectedLots || selectedLots.has(lot.lot))
+      .filter((lot) => !selectedLots || selectedLots.has(prefix + lot.lot))
       .sort((a, b) => a.lot.localeCompare(b.lot));
 
     const rowAllocs = allocateRow(row, lots);

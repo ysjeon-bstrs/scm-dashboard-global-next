@@ -146,6 +146,11 @@ export function normalizeExpiry(value: string): string {
   return value.replace(/[-/.]/g, "").trim().slice(0, 8);
 }
 
+/** Canonical SKU key: CJ stock prodCd and upload SKUs may differ in case. */
+export function normalizeCjSku(value: string): string {
+  return value.trim().toUpperCase();
+}
+
 function str(record: Record<string, unknown>, key: string): string {
   const v = record[key];
   if (v == null) return "";
@@ -183,7 +188,8 @@ export function parseFbaRows(
     // the shipment grouping key in that case instead of dropping the row.
     const referenceNumber = str(r, "reference_number");
     const shipment = str(r, "shipment_id") || referenceNumber;
-    const sku = str(r, "sku");
+    // Normalize case at the boundary so stock lookups/allocation match CJ prodCd.
+    const sku = normalizeCjSku(str(r, "sku"));
     if (!shipment || !sku) return; // skip blank rows
 
     const { start, end, prefix, width } = parseBoxIdMeta(str(r, "box_id_range"));
@@ -290,23 +296,31 @@ function validateContinuity(
 ) {
   if (row.fulfillment_type === "FBT") return; // FBT carton ids aren't sequential
   if (!isFirst) return;
-  const ids = new Set<number>();
-  for (const r of sameShipment) {
-    for (let i = r.box_start; i <= r.box_end; i += 1) ids.add(i);
-  }
-  if (ids.size === 0) return;
-  const minBox = Math.min(...ids);
-  const maxBox = Math.max(...ids);
+  // Interval walk instead of materializing every box id — a typo'd range like
+  // "1-99999999" used to hang the tab by building a hundred-million-entry Set.
+  const ranges = sameShipment
+    .filter((r) => r.box_start > 0 && r.box_end >= r.box_start)
+    .map((r) => ({ start: r.box_start, end: r.box_end }))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  if (ranges.length === 0) return;
+  const minBox = ranges[0].start;
   if (minBox !== 1) {
     setWarning(row, `[D] BoxID가 1부터 시작하지 않음 (시작: ${minBox})`);
   }
   const missing: number[] = [];
-  for (let i = minBox; i <= maxBox; i += 1) if (!ids.has(i)) missing.push(i);
-  if (missing.length > 0) {
-    const shown = missing.slice(0, 5).join(", ");
+  let missingCount = 0;
+  let cursor = minBox;
+  for (const r of ranges) {
+    if (r.start > cursor) {
+      missingCount += r.start - cursor;
+      for (let i = cursor; i < r.start && missing.length < 5; i += 1) missing.push(i);
+    }
+    cursor = Math.max(cursor, r.end + 1);
+  }
+  if (missingCount > 0) {
     setWarning(
       row,
-      `[D] BoxID 불연속: 누락된 번호 [${shown}${missing.length > 5 ? ", …" : ""}]`,
+      `[D] BoxID 불연속: 누락된 번호 [${missing.join(", ")}${missingCount > 5 ? ", …" : ""}]`,
     );
   }
 }

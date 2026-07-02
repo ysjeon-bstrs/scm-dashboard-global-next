@@ -11,6 +11,7 @@ import { createBrowserSupabaseClient } from "@/lib/scm-dashboard/supabaseBrowser
 import { dedupeCjStockRows, summarizeCjStock } from "@/lib/scm-dashboard/cjSummary";
 import {
   getRemark,
+  normalizeCjSku,
   normalizeExpiry,
   parseFbaRows,
   summarizeValidation,
@@ -382,14 +383,17 @@ export default function CjAllocationClient({
     const expiries = new Map<string, Set<string>>();
     const skusAtDepot = new Set<string>();
     for (const row of stockRows) {
-      if (row.units_per_box != null && !boxUnit.has(row.resource_code)) {
-        boxUnit.set(row.resource_code, row.units_per_box);
+      // Keys use the canonical SKU so upload rows (already normalized in
+      // parseFbaRows) match CJ prodCd regardless of case.
+      const sku = normalizeCjSku(row.resource_code);
+      if (row.units_per_box != null && !boxUnit.has(sku)) {
+        boxUnit.set(sku, row.units_per_box);
       }
       if (row.depot_code === depot) {
-        skusAtDepot.add(row.resource_code);
-        const set = expiries.get(row.resource_code) ?? new Set<string>();
+        skusAtDepot.add(sku);
+        const set = expiries.get(sku) ?? new Set<string>();
         if (row.expiration_date) set.add(normalizeExpiry(row.expiration_date));
-        expiries.set(row.resource_code, set);
+        expiries.set(sku, set);
       }
     }
     return {
@@ -437,10 +441,10 @@ export default function CjAllocationClient({
 
   // Lots eligible for the order (requested SKU+expiry at the warehouse).
   const candidateLots = useMemo(() => {
-    const wanted = new Set(validRows.map((r) => `${r.sku}|${r.expiry_norm}`));
+    const wanted = new Set(validRows.map((r) => `${normalizeCjSku(r.sku)}|${r.expiry_norm}`));
     return warehouseStock
       .filter((r) =>
-        wanted.has(`${r.resource_code}|${normalizeExpiry(r.expiration_date ?? "")}`),
+        wanted.has(`${normalizeCjSku(r.resource_code)}|${normalizeExpiry(r.expiration_date ?? "")}`),
       )
       .sort(
         (a, b) =>
@@ -454,7 +458,7 @@ export default function CjAllocationClient({
   const lotGroups = useMemo(() => {
     const demand = new Map<string, number>();
     for (const r of validRows) {
-      const key = `${r.sku}|${r.expiry_norm}`;
+      const key = `${normalizeCjSku(r.sku)}|${r.expiry_norm}`;
       demand.set(key, (demand.get(key) ?? 0) + r.qty);
     }
     const groups = new Map<
@@ -462,7 +466,7 @@ export default function CjAllocationClient({
       { sku: string; expiry: string; lots: CjLotStockRow[]; demand: number }
     >();
     for (const lot of candidateLots) {
-      const key = `${lot.resource_code}|${normalizeExpiry(lot.expiration_date ?? "")}`;
+      const key = `${normalizeCjSku(lot.resource_code)}|${normalizeExpiry(lot.expiration_date ?? "")}`;
       let group = groups.get(key);
       if (!group) {
         group = {
@@ -484,11 +488,11 @@ export default function CjAllocationClient({
     if (allocs.length === 0) return [];
     const allocByKey = new Map<string, number>();
     for (const a of allocs) {
-      const key = `${a.sku}|${normalizeExpiry(a.expiry_display)}|${a.lot}`;
+      const key = `${normalizeCjSku(a.sku)}|${normalizeExpiry(a.expiry_display)}|${a.lot}`;
       allocByKey.set(key, (allocByKey.get(key) ?? 0) + a.allocated_qty);
     }
     return candidateLots.map((l) => {
-      const key = `${l.resource_code}|${normalizeExpiry(l.expiration_date ?? "")}|${l.lot_no}`;
+      const key = `${normalizeCjSku(l.resource_code)}|${normalizeExpiry(l.expiration_date ?? "")}|${l.lot_no}`;
       const allocated = allocByKey.get(key) ?? 0;
       return {
         resource_code: l.resource_code,
@@ -542,16 +546,23 @@ export default function CjAllocationClient({
     [],
   );
 
-  function enableManualLots(on: boolean) {
-    setManualLots(on);
-    if (on) setSelectedLotSet(new Set(candidateLots.map((l) => l.lot_no)));
+  // Lot selection is keyed by SKU|expiry|lot — matching allocateOrder's stock
+  // keys — because the same lot number can recur across SKUs/expiries and a
+  // lot_no-only set would (de)select all of them at once.
+  function lotSelectionKey(lot: CjLotStockRow) {
+    return `${normalizeCjSku(lot.resource_code)}|${normalizeExpiry(lot.expiration_date ?? "")}|${lot.lot_no}`;
   }
 
-  function toggleLot(lotNo: string, checked: boolean) {
+  function enableManualLots(on: boolean) {
+    setManualLots(on);
+    if (on) setSelectedLotSet(new Set(candidateLots.map((l) => lotSelectionKey(l))));
+  }
+
+  function toggleLot(lotKey: string, checked: boolean) {
     setSelectedLotSet((prev) => {
       const next = new Set(prev);
-      if (checked) next.add(lotNo);
-      else next.delete(lotNo);
+      if (checked) next.add(lotKey);
+      else next.delete(lotKey);
       return next;
     });
   }
@@ -1124,7 +1135,7 @@ export default function CjAllocationClient({
                     {lotGroups.map((group) => {
                       const groupKey = `${group.sku}|${group.expiry}`;
                       const selected = group.lots.filter((l) =>
-                        selectedLotSet.has(l.lot_no),
+                        selectedLotSet.has(lotSelectionKey(l)),
                       );
                       const selectedQty = selected.reduce(
                         (s, l) => s + (l.available_qty || 0),
@@ -1171,10 +1182,10 @@ export default function CjAllocationClient({
                                   key={l.lot_no}
                                 >
                                   <input
-                                    checked={selectedLotSet.has(l.lot_no)}
+                                    checked={selectedLotSet.has(lotSelectionKey(l))}
                                     className="h-4 w-4 accent-brand"
                                     onChange={(event) =>
-                                      toggleLot(l.lot_no, event.currentTarget.checked)
+                                      toggleLot(lotSelectionKey(l), event.currentTarget.checked)
                                     }
                                     type="checkbox"
                                   />
