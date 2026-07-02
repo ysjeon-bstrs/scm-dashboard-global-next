@@ -336,7 +336,7 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
               <Link className="btn btn-secondary" href="/global/scm-dashboard">
                 Control Tower 보기
               </Link>
-              <button className="btn btn-secondary" onClick={() => void loadSummary(center)} type="button">
+              <button className="btn btn-secondary" disabled={isLoading} onClick={() => void loadSummary(center)} type="button">
                 데이터 새로고침
               </button>
               <span className="max-w-[14rem] truncate px-1 text-sm text-muted">{user.email}</span>
@@ -389,9 +389,7 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
         <Panel>
           <PanelHeader title="센터별 의사결정 요약" meta="선택 범위와 무관하게 전체 센터 표시" />
           {dohSummary.centers.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-line bg-sunken px-3 py-6 text-center text-sm text-muted">
-              표시할 센터 요약 데이터가 없습니다.
-            </p>
+            <p className="rounded-xl border border-dashed border-line bg-sunken px-3 py-6 text-center text-sm text-muted">{isLoading ? "센터 요약을 불러오는 중…" : "표시할 센터 요약 데이터가 없습니다."}</p>
           ) : (
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
             {dohSummary.centers.map((centerRow) => (
@@ -447,7 +445,7 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
 
           <div className="overflow-hidden rounded-xl border border-line">
             <div className="max-h-[560px] overflow-auto">
-              <table className="w-full min-w-[1320px] border-collapse text-left text-xs">
+              <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
                 <thead className="sticky top-0 z-10 bg-sunken text-[11px] font-semibold text-slate-structure">
                   <tr className="border-b border-line-strong">
                     <SortTh<AmazonDohSummaryRow> label="Action" colKey="action_label" sort={actionSort} onSort={toggleActionSort} />
@@ -461,13 +459,12 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
                     <SortTh<AmazonDohSummaryRow> label="DOH 30" colKey="doh_30d" numeric hint="최근 30일 판매속도 기준 재고 소진 예상 일수" sort={actionSort} onSort={toggleActionSort} />
                     <SortTh<AmazonDohSummaryRow> label="DOH 90" colKey="doh_90d" numeric hint="최근 90일 판매속도 기준 재고 소진 예상 일수" sort={actionSort} onSort={toggleActionSort} />
                     <SortTh<AmazonDohSummaryRow> label="7d sales" colKey="qty_7d" numeric hint="최근 7일 판매 수량" sort={actionSort} onSort={toggleActionSort} />
-                    <th className="min-w-[18rem] px-3 py-2">이유</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedActionRows.map((row) => (
                     <tr className="border-b border-line bg-surface transition hover:bg-brand-softer" key={row.raw_key}>
-                      <td className="px-3 py-2"><StatusPill tone={actionTone(row.status, row.fee_risk)}>{row.action_label}</StatusPill></td>
+                      <td className="px-3 py-2"><span className="cursor-help" title={row.action_reason}><StatusPill tone={actionTone(row.status, row.fee_risk)}>{row.action_label}</StatusPill></span></td>
                       <td className="px-3 py-2"><StatusPill tone={centerTone(row.center)}>{row.center}</StatusPill></td>
                       <td className="px-3 py-2">
                         <div className="font-mono font-semibold text-brand-ink">{row.resource_code}</div>
@@ -481,12 +478,11 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{formatNumber(row.doh_30d, 1)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{formatNumber(row.doh_90d, 1)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{formatNumber(row.qty_7d)}</td>
-                      <td className="px-3 py-2 text-muted">{row.action_reason}</td>
                     </tr>
                   ))}
                   {sortedActionRows.length === 0 ? (
                     <tr>
-                      <td className="px-3 py-10 text-center text-sm text-muted" colSpan={12}>선택한 조건에 맞는 보충 의사결정 row가 없습니다.</td>
+                      <td className="px-3 py-10 text-center text-sm text-muted" colSpan={11}>{isLoading ? "데이터를 불러오는 중…" : "선택한 조건에 맞는 보충 의사결정 row가 없습니다."}</td>
                     </tr>
                   ) : null}
                 </tbody>
@@ -557,7 +553,7 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
                   ))}
                   {sortedStockRows.length === 0 ? (
                     <tr>
-                      <td className="px-3 py-10 text-center text-sm text-muted" colSpan={11}>검색 또는 필터 조건에 맞는 Amazon 재고 row가 없습니다.</td>
+                      <td className="px-3 py-10 text-center text-sm text-muted" colSpan={11}>{isLoading ? "데이터를 불러오는 중…" : "검색 또는 필터 조건에 맞는 Amazon 재고 row가 없습니다."}</td>
                     </tr>
                   ) : null}
                 </tbody>
