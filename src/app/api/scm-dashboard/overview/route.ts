@@ -3,12 +3,8 @@ import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/scm-dashboard/auth";
 import { fetchAmazonStockSummary } from "@/lib/scm-dashboard/amazonStockQueries";
 import { fetchAcrossbSummary } from "@/lib/scm-dashboard/acrossbQueries";
-import { fetchCjLotStocks } from "@/lib/scm-dashboard/cjQueries";
+import { fetchCjStockOverview } from "@/lib/scm-dashboard/cjQueries";
 import { fetchDomesticStockSummary } from "@/lib/scm-dashboard/domesticStockQueries";
-
-function sum(values: number[]) {
-  return values.reduce((total, value) => total + value, 0);
-}
 
 export async function GET() {
   const auth = await getAuthenticatedUser();
@@ -30,10 +26,9 @@ export async function GET() {
     return null;
   });
 
-  const cj = await fetchCjLotStocks({
-    limit: 5000,
-    latestOnly: true,
-  }).catch((error: unknown) => {
+  // SQL aggregate over the full latest snapshot — a row-limited fetch here
+  // used to cap KPI sums at the first 5,000 lot rows.
+  const cj = await fetchCjStockOverview().catch((error: unknown) => {
     notices.push(
       `CJ LOT 재고를 불러오지 못했습니다: ${error instanceof Error ? error.message : "unknown error"}`,
     );
@@ -53,15 +48,6 @@ export async function GET() {
     );
     return null;
   });
-
-  const cjRows = cj?.rows ?? [];
-  const cjSkuCount = new Set(cjRows.map((row) => row.resource_code)).size;
-  const cjDepotCount = new Set(cjRows.map((row) => row.depot_code)).size;
-  const cjExpiryRiskCount = cjRows.filter((row) => {
-    if (!row.expiration_date) return false;
-    const days = Math.ceil((new Date(row.expiration_date).getTime() - Date.now()) / 86_400_000);
-    return days < 365;
-  }).length;
 
   return NextResponse.json({
     meta: {
@@ -93,15 +79,15 @@ export async function GET() {
         href: "/global/scm-dashboard/cj-allocation",
         status: cj ? "active" : "unavailable",
         status_label: cj ? "작업 가능" : "확인 필요",
-        snapshot_date: cjRows[0]?.close_date ?? null,
-        primary_metric_label: "가용재고 sample",
-        primary_metric_value: sum(cjRows.map((row) => row.available_qty)),
+        snapshot_date: cj?.close_date ?? null,
+        primary_metric_label: "가용재고",
+        primary_metric_value: cj?.available_qty ?? 0,
         secondary_metrics: [
-          { label: "SKU", value: cjSkuCount },
-          { label: "Depot", value: cjDepotCount },
-          { label: "1년내 만료 LOT", value: cjExpiryRiskCount },
+          { label: "SKU", value: cj?.sku_count ?? 0 },
+          { label: "Depot", value: cj?.depot_count ?? 0 },
+          { label: "1년내 만료 LOT", value: cj?.expiry_risk_count ?? 0 },
         ],
-        tone: cjExpiryRiskCount > 0 ? "warn" : "brand",
+        tone: (cj?.expiry_risk_count ?? 0) > 0 ? "warn" : "brand",
       },
       {
         id: "amazon",

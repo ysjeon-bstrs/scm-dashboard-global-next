@@ -139,3 +139,53 @@ export async function fetchCjLotStocks({
     rows: rows.map(mapCjLotStockRow),
   };
 }
+
+export interface CjStockOverview {
+  close_date: string | null;
+  lot_count: number;
+  sku_count: number;
+  depot_count: number;
+  available_qty: number;
+  expiry_risk_count: number;
+}
+
+// Aggregate KPIs for the overview page, computed in SQL over the full latest
+// snapshot — a row-limited fetch would silently understate the totals.
+export async function fetchCjStockOverview(): Promise<CjStockOverview> {
+  const tableName = getSafeMysqlIdentifier("SCM_MYSQL_CJ_STOCK_TABLE", "cj_stock");
+  const sql = `
+    SELECT
+      MAX(s.closeDt) AS close_date,
+      COUNT(*) AS lot_count,
+      COUNT(DISTINCT s.prodCd) AS sku_count,
+      COUNT(DISTINCT s.depotCd) AS depot_count,
+      COALESCE(SUM(s.avlbCnt), 0) AS available_qty,
+      COALESCE(SUM(
+        CASE
+          WHEN STR_TO_DATE(REPLACE(s.ValidDim, '-', ''), '%Y%m%d')
+               < DATE_ADD(CURDATE(), INTERVAL 365 DAY) THEN 1
+          ELSE 0
+        END
+      ), 0) AS expiry_risk_count
+    FROM ${tableName} s
+    WHERE s.closeDt = (SELECT MAX(closeDt) FROM ${tableName})
+  `;
+
+  const rows = await queryBoostersScmReadOnly<{
+    close_date: Date | string | null;
+    lot_count: unknown;
+    sku_count: unknown;
+    depot_count: unknown;
+    available_qty: unknown;
+    expiry_risk_count: unknown;
+  }>(sql);
+  const row = rows[0];
+  return {
+    close_date: row?.close_date ? toDateString(row.close_date) : null,
+    lot_count: toNumber(row?.lot_count),
+    sku_count: toNumber(row?.sku_count),
+    depot_count: toNumber(row?.depot_count),
+    available_qty: toNumber(row?.available_qty),
+    expiry_risk_count: toNumber(row?.expiry_risk_count),
+  };
+}
