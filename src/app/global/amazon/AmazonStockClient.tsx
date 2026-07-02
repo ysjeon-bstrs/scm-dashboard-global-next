@@ -106,11 +106,14 @@ function actionTone(status: AmazonDohStatus, feeRisk = false) {
   return "neutral" as const;
 }
 
-function compactMetric(label: string, value: string, detail?: string, tone = "text-ink") {
+// Two-tier KPI: the two decision metrics (지금/권장 발송) render as emphasized bordered
+// cards; the rest are quieter supporting figures. Color is reserved for meaning
+// (danger = act now, warn = fee risk); everything else stays neutral ink.
+function compactMetric(label: string, value: string, detail?: string, tone = "text-ink", primary = false) {
   return (
-    <div className="min-w-[8.5rem] rounded-lg border border-line bg-surface px-3 py-2">
+    <div className={primary ? "min-w-[8.5rem] rounded-lg border border-line bg-surface px-3 py-2.5" : "min-w-[8.5rem] px-3 py-2"}>
       <p className="field-label">{label}</p>
-      <p className={`mt-1 text-lg leading-none font-semibold tabular-nums ${tone}`}>{value}</p>
+      <p className={`mt-1 ${primary ? "text-2xl" : "text-lg"} leading-none font-semibold tabular-nums ${tone}`}>{value}</p>
       {detail ? <p className="mt-1 text-[11px] text-faint">{detail}</p> : null}
     </div>
   );
@@ -134,6 +137,48 @@ function filterAction(row: AmazonDohSummaryRow, filter: ActionFilter) {
   return true;
 }
 
+type SortState<T> = { key: keyof T & string; dir: "asc" | "desc" };
+
+// Stable client-side sort by a single field; numbers compare numerically, else localeCompare.
+function sortRows<T>(rows: T[], sort: SortState<T> | null): T[] {
+  if (!sort) return rows;
+  const { key, dir } = sort;
+  const sorted = [...rows].sort((a, b) => {
+    const av = a[key] as unknown;
+    const bv = b[key] as unknown;
+    if (typeof av === "number" && typeof bv === "number") return av - bv;
+    return String(av ?? "").localeCompare(String(bv ?? ""));
+  });
+  return dir === "desc" ? sorted.reverse() : sorted;
+}
+
+// Sortable header cell: click toggles asc/desc (numeric columns start descending for triage).
+function SortTh<T>({ label, colKey, numeric = false, hint, sort, onSort }: {
+  label: string;
+  colKey: keyof T & string;
+  numeric?: boolean;
+  hint?: string;
+  sort: SortState<T> | null;
+  onSort: (key: keyof T & string, numeric: boolean) => void;
+}) {
+  const active = sort?.key === colKey;
+  const arrow = active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕";
+  return (
+    <th className={`px-3 py-2 ${numeric ? "text-right" : ""}`} aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        className={`inline-flex items-center gap-1 font-semibold ${numeric ? "w-full justify-end" : ""} ${active ? "text-brand-ink" : "hover:text-ink"} ${hint ? "cursor-help" : ""}`}
+        onClick={() => onSort(colKey, numeric)}
+        title={hint}
+        type="button"
+      >
+        {label}
+        {hint ? <span className="text-[9px] text-faint" aria-hidden>ⓘ</span> : null}
+        <span className={`text-[9px] ${active ? "text-brand" : "text-faint"}`} aria-hidden>{arrow}</span>
+      </button>
+    </th>
+  );
+}
+
 export default function AmazonStockClient({ user, initialAuthError }: AmazonStockClientProps) {
   const [stockSummary, setStockSummary] = useState<AmazonStockSummary>(emptyStockSummary);
   const [dohSummary, setDohSummary] = useState<AmazonDohSummary>(emptyDohSummary);
@@ -143,6 +188,8 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
   const [actionFilter, setActionFilter] = useState<ActionFilter>("all");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionSort, setActionSort] = useState<SortState<AmazonDohSummaryRow> | null>(null);
+  const [stockSort, setStockSort] = useState<SortState<AmazonStockRow> | null>(null);
 
   const authMessage = useMemo(() => {
     if (initialAuthError === "forbidden-domain") return "boosters.kr Google 계정만 접근할 수 있습니다.";
@@ -161,12 +208,13 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
         fetch(stockUrl, { cache: "no-store" }),
         fetch(dohUrl, { cache: "no-store" }),
       ]);
-      if (!stockResponse.ok) throw new Error(`Amazon stock API failed with ${stockResponse.status}.`);
-      if (!dohResponse.ok) throw new Error(`Amazon DOH API failed with ${dohResponse.status}.`);
+      if (!stockResponse.ok) throw new Error(`stock API ${stockResponse.status}`);
+      if (!dohResponse.ok) throw new Error(`DOH API ${dohResponse.status}`);
       setStockSummary((await stockResponse.json()) as AmazonStockSummary);
       setDohSummary((await dohResponse.json()) as AmazonDohSummary);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Amazon data load failed.");
+      console.error("Amazon data load failed:", loadError);
+      setError("Amazon 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setIsLoading(false);
     }
@@ -225,6 +273,16 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
     ok: dohSummary.totals.ok_count,
     "no-sales": dohSummary.totals.no_sales_count,
   } satisfies Record<ActionFilter, number>), [dohSummary]);
+
+  const sortedActionRows = useMemo(() => sortRows(filteredActionRows, actionSort), [filteredActionRows, actionSort]);
+  const sortedStockRows = useMemo(() => sortRows(filteredStockRows, stockSort), [filteredStockRows, stockSort]);
+
+  const toggleActionSort = useCallback((key: keyof AmazonDohSummaryRow & string, numeric: boolean) => {
+    setActionSort((cur) => (cur && cur.key === key ? { key, dir: cur.dir === "asc" ? "desc" : "asc" } : { key, dir: numeric ? "desc" : "asc" }));
+  }, []);
+  const toggleStockSort = useCallback((key: keyof AmazonStockRow & string, numeric: boolean) => {
+    setStockSort((cur) => (cur && cur.key === key ? { key, dir: cur.dir === "asc" ? "desc" : "asc" } : { key, dir: numeric ? "desc" : "asc" }));
+  }, []);
 
   async function signInWithGoogle() {
     try {
@@ -318,18 +376,23 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
               </div>
             </div>
             <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-              {compactMetric("지금 발송", formatNumber(dohSummary.totals.send_now_count), "SKU", "text-danger")}
-              {compactMetric("권장 발송", formatNumber(dohSummary.totals.total_recommended_ship_qty), "net required", "text-danger")}
-              {compactMetric("입고로 커버", formatNumber(dohSummary.totals.watch_incoming_count), "watch incoming", "text-brand-ink")}
-              {compactMetric("Fee risk", formatNumber(dohSummary.totals.fee_risk_count), "US only", "text-warn-ink")}
-              {compactMetric("Sellable", formatNumber(dohSummary.totals.stock_sellable), "selected scope", "text-ok-ink")}
-              {compactMetric("Incoming", formatNumber(dohSummary.totals.stock_incoming), "expected+processing+ready", "text-brand-ink")}
+              {compactMetric("지금 발송", formatNumber(dohSummary.totals.send_now_count), "즉시 발송 필요 SKU", "text-danger", true)}
+              {compactMetric("권장 발송", formatNumber(dohSummary.totals.total_recommended_ship_qty), "순부족 합계 (EA)", "text-danger", true)}
+              {compactMetric("입고로 커버", formatNumber(dohSummary.totals.watch_incoming_count), "입고 대기로 관찰 중", "text-ink")}
+              {compactMetric("Fee risk", formatNumber(dohSummary.totals.fee_risk_count), "US 한정", "text-warn-ink")}
+              {compactMetric("Sellable", formatNumber(dohSummary.totals.stock_sellable), "선택 범위 판매가능 합계", "text-ink")}
+              {compactMetric("Incoming", formatNumber(dohSummary.totals.stock_incoming), "입고예정 + 처리중 + 준비", "text-ink")}
             </div>
           </div>
         </Panel>
 
         <Panel>
-          <PanelHeader title="센터별 의사결정 요약" meta="US 기본, 국가별 선택 가능" />
+          <PanelHeader title="센터별 의사결정 요약" meta="선택 범위와 무관하게 전체 센터 표시" />
+          {dohSummary.centers.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-line bg-sunken px-3 py-6 text-center text-sm text-muted">
+              표시할 센터 요약 데이터가 없습니다.
+            </p>
+          ) : (
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
             {dohSummary.centers.map((centerRow) => (
               <section className="rounded-xl border border-line bg-surface p-3" key={centerRow.center}>
@@ -350,6 +413,7 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
               </section>
             ))}
           </div>
+          )}
         </Panel>
 
         <Panel className="min-w-0">
@@ -386,22 +450,22 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
               <table className="w-full min-w-[1320px] border-collapse text-left text-xs">
                 <thead className="sticky top-0 z-10 bg-sunken text-[11px] font-semibold text-slate-structure">
                   <tr className="border-b border-line-strong">
-                    <th className="px-3 py-2">Action</th>
-                    <th className="px-3 py-2">Center</th>
-                    <th className="px-3 py-2">SKU / 상품</th>
-                    <th className="px-3 py-2 text-right">권장 발송</th>
-                    <th className="px-3 py-2 text-right">Sellable</th>
-                    <th className="px-3 py-2 text-right">Incoming</th>
-                    <th className="px-3 py-2 text-right">Vel 7d</th>
-                    <th className="px-3 py-2 text-right">DOH 7</th>
-                    <th className="px-3 py-2 text-right">DOH 30</th>
-                    <th className="px-3 py-2 text-right">DOH 90</th>
-                    <th className="px-3 py-2 text-right">7d sales</th>
+                    <SortTh<AmazonDohSummaryRow> label="Action" colKey="action_label" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="Center" colKey="center" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="SKU / 상품" colKey="resource_code" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="권장 발송" colKey="recommended_ship_qty" numeric hint="입고 반영 후에도 부족한 순 필요 수량 = 지금 발송을 권장하는 양" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="Sellable" colKey="stock_sellable" numeric hint="현재 판매 가능한 재고 수량" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="Incoming" colKey="stock_incoming" numeric hint="입고 예정 합계 (입고예정 + 처리중 + 출고준비)" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="Vel 7d" colKey="vel_7d" numeric hint="Velocity — 최근 7일 일평균 판매량" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="DOH 7" colKey="doh_7d" numeric hint="Days on Hand — 최근 7일 판매속도 기준 재고 소진 예상 일수" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="DOH 30" colKey="doh_30d" numeric hint="최근 30일 판매속도 기준 재고 소진 예상 일수" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="DOH 90" colKey="doh_90d" numeric hint="최근 90일 판매속도 기준 재고 소진 예상 일수" sort={actionSort} onSort={toggleActionSort} />
+                    <SortTh<AmazonDohSummaryRow> label="7d sales" colKey="qty_7d" numeric hint="최근 7일 판매 수량" sort={actionSort} onSort={toggleActionSort} />
                     <th className="min-w-[18rem] px-3 py-2">이유</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredActionRows.map((row) => (
+                  {sortedActionRows.map((row) => (
                     <tr className="border-b border-line bg-surface transition hover:bg-brand-softer" key={row.raw_key}>
                       <td className="px-3 py-2"><StatusPill tone={actionTone(row.status, row.fee_risk)}>{row.action_label}</StatusPill></td>
                       <td className="px-3 py-2"><StatusPill tone={centerTone(row.center)}>{row.center}</StatusPill></td>
@@ -420,7 +484,7 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
                       <td className="px-3 py-2 text-muted">{row.action_reason}</td>
                     </tr>
                   ))}
-                  {filteredActionRows.length === 0 ? (
+                  {sortedActionRows.length === 0 ? (
                     <tr>
                       <td className="px-3 py-10 text-center text-sm text-muted" colSpan={12}>선택한 조건에 맞는 보충 의사결정 row가 없습니다.</td>
                     </tr>
@@ -460,20 +524,20 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
                 <thead className="sticky top-0 z-10 bg-sunken text-[11px] font-semibold text-slate-structure">
                   <tr className="border-b border-line-strong">
                     <th className="px-3 py-2">상태</th>
-                    <th className="px-3 py-2">Center</th>
-                    <th className="px-3 py-2">SKU / 상품</th>
-                    <th className="px-3 py-2 text-right">Sellable</th>
-                    <th className="px-3 py-2 text-right">Available</th>
-                    <th className="px-3 py-2 text-right">Pending FC</th>
-                    <th className="px-3 py-2 text-right">Expected</th>
-                    <th className="px-3 py-2 text-right">Processing</th>
-                    <th className="px-3 py-2 text-right">Ready</th>
-                    <th className="px-3 py-2 text-right">Customer</th>
-                    <th className="min-w-[10rem] px-3 py-2">Latest update</th>
+                    <SortTh<AmazonStockRow> label="Center" colKey="center" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="SKU / 상품" colKey="resource_code" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Sellable" colKey="stock_sellable" numeric hint="현재 판매 가능한 재고 수량" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Available" colKey="stock_available" numeric hint="가용 재고 (예약/주문 제외)" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Pending FC" colKey="pending_fc" numeric hint="FC(주문처리센터) 입고 대기 수량" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Expected" colKey="stock_expected" numeric hint="입고 예정 수량" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Processing" colKey="stock_processing" numeric hint="입고 처리중 수량" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Ready" colKey="stock_readytoship" numeric hint="출고 준비 완료 수량" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Customer" colKey="customer_order" numeric hint="고객 주문(예약) 수량" sort={stockSort} onSort={toggleStockSort} />
+                    <SortTh<AmazonStockRow> label="Latest update" colKey="latest_updated_at" sort={stockSort} onSort={toggleStockSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredStockRows.map((row) => (
+                  {sortedStockRows.map((row) => (
                     <tr className="border-b border-line bg-surface transition hover:bg-brand-softer" key={row.raw_key}>
                       <td className="px-3 py-2"><StatusPill tone={stockTone(row)}>{inboundTotal(row) > 0 ? "입고중" : row.stock_sellable > 0 ? "재고" : "확인"}</StatusPill></td>
                       <td className="px-3 py-2"><StatusPill tone={centerTone(row.center)}>{row.center}</StatusPill></td>
@@ -491,7 +555,7 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
                       <td className="min-w-[10rem] px-3 py-2 font-mono text-[11px] whitespace-nowrap text-faint">{row.latest_updated_at ? row.latest_updated_at.slice(0, 10) : "-"}</td>
                     </tr>
                   ))}
-                  {filteredStockRows.length === 0 ? (
+                  {sortedStockRows.length === 0 ? (
                     <tr>
                       <td className="px-3 py-10 text-center text-sm text-muted" colSpan={11}>검색 또는 필터 조건에 맞는 Amazon 재고 row가 없습니다.</td>
                     </tr>
@@ -503,8 +567,8 @@ export default function AmazonStockClient({ user, initialAuthError }: AmazonStoc
         </Panel>
 
         {isLoading ? (
-          <div className="fixed right-4 bottom-4 flex items-center gap-2 rounded-full bg-ink px-3.5 py-2 text-sm font-medium text-paper shadow-pop">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-on-brand" />
+          <div className="fixed right-4 bottom-4 flex items-center gap-2 rounded-full bg-ink px-3.5 py-2 text-sm font-medium text-paper shadow-pop" role="status" aria-live="polite">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-on-brand motion-reduce:animate-none" />
             Amazon 의사결정 데이터 불러오는 중
           </div>
         ) : null}

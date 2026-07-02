@@ -33,7 +33,7 @@ test("Amazon center changes are not reset to AMZUS by the data-load effect", () 
 });
 
 test("Inventory detail shows SKU with Korean product name and searches both", () => {
-  assert.match(source, />SKU \/ 상품<\//, "Inventory detail header should show SKU / 상품");
+  assert.match(source, /label="SKU \/ 상품"/, "Inventory detail should have a sortable SKU / 상품 column");
   assert.match(
     source,
     /stockNameBySku\.set\(row\.resource_code, row\.resource_name\)/,

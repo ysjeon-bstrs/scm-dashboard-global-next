@@ -138,7 +138,7 @@ export async function fetchAmazonDohSummary(
   if (!snapshotDate) return buildAmazonDohSummary([], { selectedCenter });
 
   const limit = clampLimit(options.limit, DEFAULT_LIMIT, 10000);
-  let query = supabase
+  const query = supabase
     .from(DOH_TABLE)
     .select("*")
     .eq("snapshot_date", snapshotDate)
@@ -147,7 +147,6 @@ export async function fetchAmazonDohSummary(
     .order("doh_7d", { ascending: true })
     .limit(limit);
 
-  if (selectedCenter !== "ALL") query = query.eq("center", selectedCenter);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
