@@ -29,9 +29,9 @@ test("calculates calendar zero-filled velocities and net required quantity", () 
     },
   ];
   const sales: AmazonDohSalesInput[] = [
-    { order_date_pt: "2026-06-16", center: "AMZUS", resource_code: "BA00022", resource_name: "Serum from sales", qty_total: 14 },
-    { order_date_pt: "2026-06-14", center: "AMZUS", resource_code: "BA00022", resource_name: "Serum from sales", qty_total: 7 },
-    { order_date_pt: "2026-06-01", center: "AMZUS", resource_code: "BA00022", resource_name: "Serum from sales", qty_total: 30 },
+    { order_date_pt: "2026-06-16", center: "AMZUS", resource_code: "BA00022", resource_name: "Serum from sales", qty_shipped: 14 },
+    { order_date_pt: "2026-06-14", center: "AMZUS", resource_code: "BA00022", resource_name: "Serum from sales", qty_shipped: 7 },
+    { order_date_pt: "2026-06-01", center: "AMZUS", resource_code: "BA00022", resource_name: "Serum from sales", qty_shipped: 30 },
   ];
 
   const rows = buildAmazonDohRows({ inventory, sales, snapshotDate: "2026-06-17", etlRunId: "run-1" });
@@ -84,13 +84,13 @@ test("excludes configured SKUs entirely and supports non-US centers", () => {
     },
   ];
   const sales: AmazonDohSalesInput[] = [
-    { order_date_pt: "2026-06-16", center: "AMZDE", resource_code: "BA00022", qty_total: 14 },
-    { order_date_pt: "2026-06-15", center: "AMZDE", resource_code: "BA00022", qty_total: 14 },
-    { order_date_pt: "2026-06-14", center: "AMZDE", resource_code: "BA00022", qty_total: 14 },
-    { order_date_pt: "2026-06-13", center: "AMZDE", resource_code: "BA00022", qty_total: 14 },
-    { order_date_pt: "2026-06-12", center: "AMZDE", resource_code: "BA00022", qty_total: 14 },
-    { order_date_pt: "2026-06-11", center: "AMZDE", resource_code: "BA00022", qty_total: 14 },
-    { order_date_pt: "2026-06-10", center: "AMZDE", resource_code: "BA00022", qty_total: 14 },
+    { order_date_pt: "2026-06-16", center: "AMZDE", resource_code: "BA00022", qty_shipped: 14 },
+    { order_date_pt: "2026-06-15", center: "AMZDE", resource_code: "BA00022", qty_shipped: 14 },
+    { order_date_pt: "2026-06-14", center: "AMZDE", resource_code: "BA00022", qty_shipped: 14 },
+    { order_date_pt: "2026-06-13", center: "AMZDE", resource_code: "BA00022", qty_shipped: 14 },
+    { order_date_pt: "2026-06-12", center: "AMZDE", resource_code: "BA00022", qty_shipped: 14 },
+    { order_date_pt: "2026-06-11", center: "AMZDE", resource_code: "BA00022", qty_shipped: 14 },
+    { order_date_pt: "2026-06-10", center: "AMZDE", resource_code: "BA00022", qty_shipped: 14 },
   ];
 
   const rows = buildAmazonDohRows({ inventory, sales, snapshotDate: "2026-06-17", etlRunId: "run-1" });

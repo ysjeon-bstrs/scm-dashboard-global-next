@@ -19,7 +19,9 @@ export interface AmazonDohSalesInput {
   center: string;
   resource_code: string;
   resource_name?: string | null;
-  qty_total: number;
+  // Shipped units only — velocity/DOH measure realized stock depletion, so
+  // unshipped/pending orders must be excluded (fed from mart qty_shipped).
+  qty_shipped: number;
 }
 
 export type AmazonDohStatus =
@@ -223,7 +225,7 @@ function buildSalesIndex(sales: AmazonDohSalesInput[]) {
     const resourceCode = cleanString(row.resource_code);
     if (!date || !center || !resourceCode) continue;
     const key = `${center}||${resourceCode}||${date}`;
-    index.set(key, (index.get(key) ?? 0) + nonNegative(row.qty_total));
+    index.set(key, (index.get(key) ?? 0) + nonNegative(row.qty_shipped));
   }
   return index;
 }

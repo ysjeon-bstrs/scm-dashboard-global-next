@@ -168,7 +168,8 @@ async function fetchSalesRows(
   const params = new URLSearchParams();
   params.set("order_date_pt", `gte.${options.startDate}`);
   params.append("order_date_pt", `lte.${options.endDate}`);
-  params.set("select", "order_date_pt,center,resource_code,resource_name,qty_total");
+  // Velocity/DOH use shipped units only (exclude unshipped/pending orders).
+  params.set("select", "order_date_pt,center,resource_code,resource_name,qty_shipped");
   params.set("sales_channel", `in.(${TARGET_SALES_CHANNELS.map((channel) => `\"${channel}\"`).join(",")})`);
   params.set("order", "order_date_pt.asc,center.asc,resource_code.asc");
   if (options.center) params.set("center", `eq.${options.center}`);
@@ -272,7 +273,7 @@ function compareLegacySummary(
 async function applyToSupabase(
   env: SupabaseEnv,
   rows: AmazonDohRow[],
-  context: { etlRunId: string; snapshotDate: string; summary: unknown },
+  context: { etlRunId: string; snapshotDate: string; center?: string; summary: unknown },
 ) {
   await writeEtlLog(env, {
     etl_run_id: context.etlRunId,
@@ -287,6 +288,13 @@ async function applyToSupabase(
   });
   try {
     const written = await upsertBatches(env, "mart_amazon_doh_snapshot", rows, "snapshot_date,center,resource_code");
+    // Stale-row cleanup: after upserting the current payload (all tagged with the
+    // new etl_run_id), delete same-snapshot rows left by a prior run — SKUs that
+    // dropped out. Scope to --center when partial. Guarded by written>0 so a
+    // transient empty fetch never wipes a good snapshot.
+    const deletedStale = written > 0
+      ? await deleteStaleRows(env, { snapshotDate: context.snapshotDate, center: context.center, etlRunId: context.etlRunId })
+      : 0;
     await writeEtlLog(env, {
       etl_run_id: context.etlRunId,
       pipeline: PIPELINE,
@@ -296,10 +304,10 @@ async function applyToSupabase(
       raw_rows: 0,
       mart_lot_rows: 0,
       mart_sku_rows: written,
-      summary: context.summary,
+      summary: { ...(context.summary as Record<string, unknown>), deleted_stale_rows: deletedStale },
       finished_at: new Date().toISOString(),
     });
-    return { martWritten: written };
+    return { martWritten: written, deletedStale };
   } catch (error) {
     await writeEtlLog(env, {
       etl_run_id: context.etlRunId,
@@ -361,6 +369,35 @@ async function supabasePost(
     const text = await response.text();
     throw new Error(`Supabase ${table} ${response.status}: ${text}`);
   }
+}
+
+async function deleteStaleRows(
+  env: SupabaseEnv,
+  { snapshotDate, center, etlRunId }: { snapshotDate: string; center?: string; etlRunId: string },
+) {
+  const params = new URLSearchParams();
+  params.set("snapshot_date", `eq.${snapshotDate}`);
+  params.set("etl_run_id", `neq.${etlRunId}`);
+  if (center) params.set("center", `eq.${center}`);
+  return supabaseDelete(env, "mart_amazon_doh_snapshot", params);
+}
+
+async function supabaseDelete(env: SupabaseEnv, table: TableName, params: URLSearchParams): Promise<number> {
+  const url = `${env.url}/rest/v1/${table}?${params.toString()}`;
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      apikey: env.apiKey,
+      authorization: `Bearer ${env.apiKey}`,
+      Prefer: "count=exact,return=minimal",
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Supabase DELETE ${table} ${response.status}: ${text}`);
+  }
+  const count = Number((response.headers.get("content-range") ?? "").split("/").pop());
+  return Number.isFinite(count) ? count : 0;
 }
 
 function addDays(date: string, days: number) {
