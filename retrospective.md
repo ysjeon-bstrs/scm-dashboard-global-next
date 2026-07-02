@@ -12,7 +12,7 @@ project-specific knowledge: conventions, decisions, and anti-patterns.
 
 - 상품 마스터 = `scm_global_move_master_item`; 입수량 = `box_count`, 조인키 `product_code` = cj_stock.`prodCd`; `pallet_load_count = box_count × full_pallet_box_count` (예: BA00021=108). cj_stock × 마스터 JOIN은 collation이 달라 양변에 `COLLATE utf8mb4_unicode_ci` 필수.
 - 원본 CJ outbound 로직 출처 = 레포 `ysjeon-bstrs/scm_dashboard` → `scm_dashboard_v9/ui/cj_outbound.py` (SCM_GLOBAL 아님). 검증 코드 A~G, 배정 = 요청 유통기한 한정 + 같은 유통기한 잔여를 혼입 박스로 묶음.
-- 회사 SCM MySQL은 read-only 풀(env `SCM_SOURCE_DB_*`, legacy `BOOSTERS_SCM_MYSQL_*`); `.env.local`에 실 자격증명 → 배포 사이클 대신 `node --env-file=.env.local`로 read-only SELECT 검증 (앱은 boosters.kr 인증 게이트라 로컬 브라우저 테스트 불가).
+- (SCM MySQL read-only 접근·boosters.kr 인증 게이트는 전역 회고로 이동 — `~/.claude/retrospective.md`)
 - 디자인 = impeccable(`.impeccable.md`): OKLCH tinted 팔레트 + Pretendard, 공유 프리미티브 `src/components/scm-dashboard/ui.tsx`, 토큰/공통 클래스 `globals.css`, AG 그리드는 flush + 전 컬럼 좌측정렬, 라이트 전용.
 - Git: `main` 직접 push; push 전 `npm run lint && npx tsc --noEmit && npm run build && npm test`. 기능 커밋엔 기존 OSS 정리 변경(.env.example/README/docs/ 등) 섞지 말고 파일을 명시적으로 스테이징.
 - Wrap-up 하네스는 Codex 전역 skill `C:\Users\BST-Desktop-051\.agents\skills\wrapup\SKILL.md`와 repo `AGENTS.md`의 Project memory 섹션으로 연결한다.
@@ -29,7 +29,6 @@ project-specific knowledge: conventions, decisions, and anti-patterns.
 ## Anti-patterns / gotchas
 
 - CJ WMS 다운로드는 전량 배정(shortageEa === 0)일 때만 허용 — 부족분이 있으면 막아야 부분 파일이 안 나간다.
-- Windows PowerShell `Get-Content` 출력이 한글 mojibake처럼 보여도 파일 인코딩 문제로 단정하지 말고 IDE/UTF-8 검사 결과를 우선 확인한다.
 - `.claude/worktrees/*` worktree엔 node_modules가 없다 → 빌드 전 `npm ci` 필수. 부모 node_modules를 junction으로 연결하면 Turbopack이 "Symlink points out of filesystem root"로 패닉하니 금지.
 - 테스트는 `npm test`(tsx)로 — tsx는 확장자 없는 TS import를 해석하지만, raw `node --test --experimental-strip-types`는 그런 소스 값-import(예: `stagingStatus.ts`→`./supabaseRest`)에서 `ERR_MODULE_NOT_FOUND`로 깨진다.
 - **month-scoped ocean recompute는 불완전** — moves는 `onboard_date` 월로, settlement는 `invoice_date` 월로 필터해서 월 경계 BL(onboard M·invoice M+1)이 어느 월 런에서도 배정 안 됨. 그래서 월 cleanup/apply를 막아둠(정식화는 open thread ①).
@@ -42,5 +41,4 @@ project-specific knowledge: conventions, decisions, and anti-patterns.
 - **① 월별 ocean recompute 정식화** (데이터 커지면): BL 소속월 = `max(invoice_date)`의 YYYY-MM · 대상월 후보 = 그 max가 M인 BL("M월 라인 있는 BL" 아님) · 확정 BL은 settlement 라인 전월 포함 전량 fetch · moves는 `bl_no IN (...)`(onboard 무관) · 그때 month-scoped cleanup/apply 재활성.
 - 핸드롤 우측정렬 테이블은 정산 콘솔의 **의도적 예외(확정)** — AG Grid 좌측정렬 규칙은 AG 그리드에만 적용. Amazon 페이지(`AmazonStockClient`)도 동일 패턴이라 같은 예외로 문서화할지 결정 필요.
 - 레포 전체 리뷰 백로그(비정산 P2/P3): **CJ**(혼합박스 주문번호·PDF명 중복, `selectedLotSet` `lot_no`-only 키 충돌, BoxID 거대범위 hang, SKU 대소문자) · **Amazon**(DOH stale 행 미삭제, 미출고 수량이 velocity에 포함, 단일센터 선택 시 센터 카드 누락) · **domestic**(summary가 cap된 페이지로 집계, 버킷 페이지네이션 ORDER BY 부재, 제외버킷 만료 blind) · **scm-core**(공유 컴포넌트 6종 + `/api/scm-dashboard` GET·transform/queries/excel 데드, overview KPI 5000 cap 합산) · **platform**(`assertReadOnlySql`가 `INTO OUTFILE`/내부 세미콜론 허용, signout POST CSRF 없음, forbidden-domain signOut이 SC 렌더 중 쿠키 미삭제).
-- 포털(`yoochiho/scm_portal`) 이식 보류 — 가능성 검증됨(WRITE 권한, 동일 스택, 같은 SCM DB). 작업: Supabase→`requireUser`/`withAuth`, DB→`queryMysqlScm`(positional `?`·제네릭 미지원), 포털 톤 리스킨, 네비 등록은 `automationNavigation.ts` 또는 `/settings/tabs`.
 - 메인 SCM 대시보드 페이지는 CJ 페이지 수준의 정리(데이터·디자인)가 아직 미적용.
