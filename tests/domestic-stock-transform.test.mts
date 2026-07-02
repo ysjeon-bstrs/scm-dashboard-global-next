@@ -103,3 +103,39 @@ test("treats DL_입고 as 디자인KR running stock and excludes temporary/waiti
   assert.equal(result.summary.bucketTotals["DL_입고"].include_in_running_stock, true);
   assert.equal(result.summary.bucketTotals["임시(부스터스)"].include_in_running_stock, false);
 });
+
+test("nearest expiration also surfaces excluded-bucket lots", () => {
+  const raw: DomesticStockRawRow[] = [
+    {
+      standard_date: "2026-06-10",
+      product_code: "BA00022",
+      product_name: "세럼",
+      lot: "R0",
+      expiration_date: "2029-04-07",
+      warehouse_lname: "DL_입고",
+      location: "C2-01-01-00",
+      stock_quantity: "100",
+      delivery_wait_quantity: "0",
+      available_stock_quantity: "100",
+    },
+    {
+      standard_date: "2026-06-10",
+      product_code: "BA00022",
+      product_name: "세럼",
+      lot: "R1",
+      // Expires BEFORE the running lot but sits in an excluded bucket —
+      // it must still drive nearest_expiration_date.
+      expiration_date: "2026-08-01",
+      warehouse_lname: "임시(부스터스)",
+      location: "00-00-00-00",
+      stock_quantity: "25",
+      delivery_wait_quantity: "0",
+      available_stock_quantity: "25",
+    },
+  ];
+
+  const result = transformDomesticStockRows(raw, { etlRunId: "test-run" });
+
+  assert.equal(result.skuRows.length, 1);
+  assert.equal(result.skuRows[0].nearest_expiration_date, "2026-08-01");
+});

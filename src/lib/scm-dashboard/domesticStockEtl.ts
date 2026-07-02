@@ -332,11 +332,14 @@ function buildSkuRows(lotRows: DomesticLotSnapshotUpsertRow[], etlRunId: string)
     current.stock_total += row.stock_quantity;
     current.delivery_wait_quantity += row.delivery_wait_quantity;
     current.lotKeys.add(`${row.lot}|${row.expiration_date ?? ""}`);
+    // Nearest expiry considers every lot with stock — excluded buckets
+    // (임시/대기 등) are still physical stock, and an expiring lot there must
+    // not be invisible just because it doesn't count as 운영재고.
+    if (row.expiration_date) current.expirationDates.add(row.expiration_date);
 
     if (row.include_in_running_stock) {
       current.stock_running += row.stock_quantity;
       current.available_running += row.available_stock_quantity;
-      if (row.expiration_date) current.expirationDates.add(row.expiration_date);
     } else {
       current.stock_excluded += row.stock_quantity;
     }

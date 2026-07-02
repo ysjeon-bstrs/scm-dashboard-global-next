@@ -123,39 +123,57 @@ export async function fetchDomesticStockSummary(
   }
 
   const limit = clampLimit(options.limit, 5000, 10000);
-  const { data, error } = await supabase
-    .from(SKU_TABLE)
-    .select("*")
-    .eq("warehouse_code", warehouseCode)
-    .eq("snapshot_date", snapshotDate)
-    .order("stock_running", { ascending: false })
-    .order("product_code", { ascending: true })
-    .limit(limit);
-
-  if (error) throw new Error(error.message);
-
-  const rows = (data ?? []) as DomesticStockSkuRow[];
+  // Fetch the whole snapshot page-by-page so totals/counts aggregate over ALL
+  // SKUs; `limit` only caps the rows returned for display. A single limited
+  // fetch here used to silently understate the summary once SKUs exceeded it.
+  const allRows = await fetchAllSkuRows(supabase, warehouseCode, snapshotDate);
+  const rows = allRows.slice(0, limit);
   const buckets = await fetchDomesticBucketSummary(supabase, warehouseCode, snapshotDate);
 
   return {
     meta: {
       snapshot_date: snapshotDate,
       warehouse_code: warehouseCode,
-      sku_count: rows.length,
-      running_sku_count: rows.filter((row) => num(row.stock_running) > 0).length,
+      sku_count: allRows.length,
+      running_sku_count: allRows.filter((row) => num(row.stock_running) > 0).length,
       generated_at: new Date().toISOString(),
     },
     totals: {
-      stock_running: sum(rows, "stock_running"),
-      stock_total: sum(rows, "stock_total"),
-      stock_excluded: sum(rows, "stock_excluded"),
-      available_running: sum(rows, "available_running"),
-      delivery_wait_quantity: sum(rows, "delivery_wait_quantity"),
-      lot_count: sum(rows, "lot_count"),
+      stock_running: sum(allRows, "stock_running"),
+      stock_total: sum(allRows, "stock_total"),
+      stock_excluded: sum(allRows, "stock_excluded"),
+      available_running: sum(allRows, "available_running"),
+      delivery_wait_quantity: sum(allRows, "delivery_wait_quantity"),
+      lot_count: sum(allRows, "lot_count"),
     },
     buckets,
     rows,
   };
+}
+
+async function fetchAllSkuRows(
+  supabase: SupabaseClient,
+  warehouseCode: string,
+  snapshotDate: string,
+) {
+  const rows: DomesticStockSkuRow[] = [];
+  for (let from = 0; ; from += DEFAULT_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(SKU_TABLE)
+      .select("*")
+      .eq("warehouse_code", warehouseCode)
+      .eq("snapshot_date", snapshotDate)
+      .order("stock_running", { ascending: false })
+      .order("product_code", { ascending: true })
+      .order("raw_key", { ascending: true })
+      .range(from, from + DEFAULT_PAGE_SIZE - 1);
+
+    if (error) throw new Error(error.message);
+    const page = (data ?? []) as DomesticStockSkuRow[];
+    rows.push(...page);
+    if (page.length < DEFAULT_PAGE_SIZE) break;
+  }
+  return rows;
 }
 
 export async function fetchDomesticStockLots(options: FetchDomesticStockLotsOptions = {}) {
@@ -274,6 +292,9 @@ async function fetchAllLotRowsForBucketSummary(
       )
       .eq("warehouse_code", warehouseCode)
       .eq("snapshot_date", snapshotDate)
+      // Deterministic pagination: without ORDER BY, ranges can skip/repeat
+      // rows across pages and corrupt the bucket totals.
+      .order("raw_key", { ascending: true })
       .range(from, to);
 
     if (error) throw new Error(error.message);
